@@ -429,7 +429,7 @@ describe("PUBLIC bin ownership (guard finding 1 — the wrapper is the real fron
         `OPENRIG_HOME=${quote(home)} OPENRIG_URL=http://127.0.0.1:9 ${quote(process.execPath)} ${quote(binWrapper)}; printf '%s' $? > ${quote(exitFile)}; sleep 15`]);
       expect(run.status, diagnostic(run)).toBe(0);
       let text = "";
-      for (let i = 0; i < 20 && !/EXPLORER|mission control could not start|Usage: rig/.test(text); i++) {
+      for (let i = 0; i < 20 && !/EXPLORER|mission control could not start|Usage: squad/.test(text); i++) {
         spawnSync("sleep", ["0.5"]);
         const capture = tmux(["capture-pane", "-t", session, "-p"]);
         expect(capture.status, diagnostic(capture)).toBe(0);
@@ -439,7 +439,7 @@ describe("PUBLIC bin ownership (guard finding 1 — the wrapper is the real fron
       // Do not reinterpret an empty capture or failed tmux client as a valid UI result.
       const pane = tmux(["display-message", "-p", "-t", session, "#{pane_current_command} #{pane_dead} #{pane_dead_status}"]);
       expect(text, `${diagnostic(pane)} pane=${pane.stdout}`).toMatch(/EXPLORER|mission control could not start/);
-      expect(text).not.toMatch(/Usage: rig \[options\] \[command\]/);
+      expect(text).not.toMatch(/Usage: squad \[options\] \[command\]/);
     } finally {
       tmux(["kill-server"]); // Only this test's private server.
       rmSync(home, { recursive: true, force: true });
@@ -460,7 +460,7 @@ describe("PUBLIC bin ownership (guard finding 1 — the wrapper is the real fron
       encoding: "utf-8",
     });
     expect(result.status).toBe(0);
-    expect(`${result.stderr}${result.stdout}`).toMatch(/Usage: rig/);
+    expect(`${result.stderr}${result.stdout}`).toMatch(/Usage: squad/);
   });
 
   it.skipIf(!existsSync(binWrapper))("PUBLIC bin subcommands are untouched (rig --version via wrapper)", () => {
@@ -484,14 +484,14 @@ describe("script-safety integration (the compiled front door)", () => {
     // pre-slice-17 baseline: commander's clean-help path prints usage and
     // exits 0 — the front door PRESERVES the piped path byte-for-byte
     expect(result.status).toBe(0);
-    expect(`${result.stderr}${result.stdout}`).toMatch(/Usage: rig/);
+    expect(`${result.stderr}${result.stdout}`).toMatch(/Usage: squad/);
     expect(`${result.stderr}${result.stdout}`).not.toMatch(/\n\s+at /);
   });
 
   it.skipIf(!existsSync(cliEntry))("`rig --help` still exits 0 with the full usage (front-door regression)", () => {
     const result = spawnSync(process.execPath, [cliEntry, "--help"], { timeout: 5000, encoding: "utf-8" });
     expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/Usage: rig/);
+    expect(result.stdout).toMatch(/Usage: squad/);
     expect(result.stdout).toMatch(/daemon/);
   });
 });
