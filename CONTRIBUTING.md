@@ -1,31 +1,29 @@
-# Contributing to OpenRig
+# Contributing to Squadron
 
-Thanks for being here. OpenRig is built in the open and by the thing it is: a rig of coding
-agents and a small group of people. External pull requests and issues have started arriving
-faster than we planned for, which is the best problem to have. This page says how to get a
-change in with the least friction on both sides.
+Thanks for being here. Squadron is a pre-release fork of [OpenRig](https://github.com/mvschwarz/openrig).
+This page says how to get a change in with the least friction on both sides. Fixes to inherited
+OpenRig code are welcome here, and are worth sending to
+[OpenRig](https://github.com/mvschwarz/openrig/blob/main/CONTRIBUTING.md) too.
 
 ## Before you start
 
-- **Bugs:** open an issue with the bug template. Include your OpenRig version (`rig --version`),
+- **Bugs:** open an issue with the bug template. Include your Squadron version (`squad --version`),
   OS, Node version, which harnesses are involved (or none), and the relevant command and output.
   Reports are public: remove credentials, private prompts, personal details and private paths
   before posting. Share a small reproduction rather than a full transcript or instance dump.
-- **Features and behaviour changes:** open an issue or a Discussion in *Ideas* first. A short
-  "what I am trying to do and what stops me" saves both of us a rewrite. Small, obvious fixes do
-  not need an issue.
-- **Questions:** use [Discussions › Q&A](https://github.com/mvschwarz/openrig/discussions/categories/q-a),
-  not an issue.
+- **Features and behaviour changes:** open an issue first. A short "what I am trying to do and what
+  stops me" saves both of us a rewrite. Small, obvious fixes do not need an issue.
 
 ## Setting up
 
-Node `^22 || ^24` and a working `tmux` are required. Then:
+Node `^22 || ^24` is required. Running agents also needs a working `tmux` on macOS or Linux;
+building and testing the CLI works on Windows too. Then:
 
 ```bash
-git clone https://github.com/mvschwarz/openrig.git
-cd openrig
-npm install
-npm run build          # all workspaces
+git clone https://github.com/hasnain112e/squadron.git
+cd squadron
+npm ci
+npm run build          # all workspaces (on Windows the TUI package still needs a POSIX shell to build)
 npm test               # repo checks + daemon, cli, tui test suites
 npm run lint           # typecheck every package
 ```
@@ -52,7 +50,7 @@ your working copy.
 - Add or update a test where the change is testable. Use focused deterministic tests where
   possible. For terminal or provider behaviour, state what was exercised with the actual runtime
   and what was simulated; a stub alone does not prove the native interaction works.
-- Do not edit `CHANGELOG.md`. Maintainers write release notes at the tag.
+- Do not edit `CHANGELOG.md`. The maintainer writes release notes at the tag.
 - Do not bump versions.
 - Match the surrounding style. `npm run lint` typechecks; it does not format code.
 - Write commit messages in the form the log already uses: `fix(cli): …`, `feat(daemon): …`,
@@ -67,23 +65,15 @@ what you actually ran, and any checks you could not run. Redact private informat
 Contributions follow the repository's [Apache-2.0 license](LICENSE). Preserve attribution and any
 applicable license notices when adapting third-party material.
 
-## What to expect from us
+## What to expect
 
-- We aim to acknowledge issues and pull requests within **one day**. An acknowledgement is not
-  a completed review or a merge decision.
-- Our target for a first substantive review decision on an external PR is **seven days**. If it
-  takes longer, we explain what is pending on the PR. This is a target, not a guaranteed deadline.
-- Labels you will see: `needs-repro` (we could not reproduce it yet; waiting on versions or steps),
-  `fixed-on-main` (merged, not yet on npm), `good first issue`, `help wanted`, `discussion`
-  (direction question; continues in Discussions).
-
-Reviews here are done by people and by the project's own agents. An agent may ask the first
-clarifying question or run the reproduction; a maintainer makes the merge decision.
+Squadron is small and early, and makes no response-time commitment yet. Small, well-tested changes
+are the easiest to review.
 
 ## Where things live
 
-- Repository reference: `docs/reference/`; user documentation: [openrig.dev/docs](https://openrig.dev/docs).
+- Repository reference: `docs/reference/`.
 - Skills: `packages/daemon/specs/agents/shared/skills/` and plugin skills under
   `packages/daemon/assets/plugins/`; static context-pack sources: `packages/daemon/context-packs-src/`.
   Generated packs live in `packages/daemon/context-packs/` and are not hand-edited or committed.
-- Releases: [GitHub Releases](https://github.com/mvschwarz/openrig/releases) and npm `@openrig/cli`.
+- Releases: none yet.

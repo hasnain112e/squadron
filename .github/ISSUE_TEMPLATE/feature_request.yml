@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For open-ended ideas or "how should this work" questions, [Discussions › Ideas](https://github.com/mvschwarz/openrig/discussions/categories/ideas) is the better place. Use this form when you can name the outcome you want.
+        Use this form when you can name the outcome you want.
         This request will be public; use examples without credentials, private prompts or personal details.
   - type: textarea
     id: outcome
