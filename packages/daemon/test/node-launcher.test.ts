@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 import type Database from "better-sqlite3";
 import { createDb } from "../src/db/connection.js";
 import { migrate } from "../src/db/migrate.js";
@@ -12,6 +16,7 @@ import { RigRepository } from "../src/domain/rig-repository.js";
 import { SessionRegistry } from "../src/domain/session-registry.js";
 import { EventBus } from "../src/domain/event-bus.js";
 import { NodeLauncher } from "../src/domain/node-launcher.js";
+import { SeatSandboxService } from "../src/domain/seat-sandbox-service.js";
 import type { TmuxOptionDefaultsApplier } from "../src/domain/tmux-option-defaults.js";
 import type { TmuxAdapter, TmuxResult } from "../src/adapters/tmux.js";
 import type { PersistedEvent } from "../src/domain/types.js";
@@ -570,6 +575,86 @@ describe("NodeLauncher", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error("expected ok");
       expect(result.warnings).toBeUndefined();
+    });
+  });
+
+  describe("seat sandboxes (isolation: worktree)", { timeout: 30_000 }, () => {
+    let tmp: string;
+    let repo: string;
+
+    beforeEach(() => {
+      tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "squad-launch-")));
+      repo = path.join(tmp, "repo");
+      fs.mkdirSync(repo);
+      execFileSync("git", ["-C", repo, "init", "-q", "-b", "main"]);
+      execFileSync("git", ["-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-q", "-m", "base"]);
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
+    function seedSandboxedSeat(repoPath: string) {
+      const rig = rigRepo.createRig("r01");
+      const node = rigRepo.addNode(rig.id, "dev1-impl", { role: "worker", runtime: "claude-code", cwd: repoPath });
+      const sandboxes = new SeatSandboxService(db);
+      sandboxes.request({ nodeId: node.id, rigId: rig.id, seat: "dev1-impl", repoPath });
+      return { rig, node, sandboxes };
+    }
+
+    function launcherWith(sandboxes: SeatSandboxService, createSession: (name: string, cwd?: string) => Promise<TmuxResult>) {
+      return new NodeLauncher({
+        db, rigRepo, sessionRegistry, eventBus,
+        tmuxAdapter: mockTmuxAdapter({ createSession }),
+        sandboxes,
+      });
+    }
+
+    it("starts the seat inside its worktree and points node.cwd there", async () => {
+      const { rig, node, sandboxes } = seedSandboxedSeat(repo);
+      const createSpy = vi.fn<(name: string, cwd?: string) => Promise<TmuxResult>>().mockResolvedValue({ ok: true });
+
+      const result = await launcherWith(sandboxes, createSpy).launchNode(rig.id, "dev1-impl");
+
+      const worktree = path.join(tmp, "squad-worktrees", "repo", "r01", "dev1-impl");
+      expect(result.ok).toBe(true);
+      expect(createSpy.mock.calls[0]![1]).toBe(worktree);
+      expect(rigRepo.getRig(rig.id)!.nodes.find((n) => n.id === node.id)!.cwd).toBe(worktree);
+      expect(fs.existsSync(path.join(worktree, ".git"))).toBe(true);
+    });
+
+    it("wins over a cwd the caller passes in", async () => {
+      const { rig, sandboxes } = seedSandboxedSeat(repo);
+      const createSpy = vi.fn<(name: string, cwd?: string) => Promise<TmuxResult>>().mockResolvedValue({ ok: true });
+
+      await launcherWith(sandboxes, createSpy).launchNode(rig.id, "dev1-impl", { cwd: repo });
+
+      expect(createSpy.mock.calls[0]![1]).toBe(path.join(tmp, "squad-worktrees", "repo", "r01", "dev1-impl"));
+    });
+
+    it("does not start a tmux session when the worktree cannot be made", async () => {
+      const plain = path.join(tmp, "plain");
+      fs.mkdirSync(plain);
+      const { rig, sandboxes } = seedSandboxedSeat(plain);
+      const createSpy = vi.fn<(name: string, cwd?: string) => Promise<TmuxResult>>().mockResolvedValue({ ok: true });
+
+      const result = await launcherWith(sandboxes, createSpy).launchNode(rig.id, "dev1-impl");
+
+      expect(result).toMatchObject({ ok: false, code: "sandbox_failed" });
+      expect(!result.ok && result.message).toMatch(/needs a git repository/);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(sessionRegistry.getSessionsForRig(rig.id)).toHaveLength(0);
+    });
+
+    it("leaves a seat without a sandbox in its recorded cwd", async () => {
+      const rig = rigRepo.createRig("r01");
+      rigRepo.addNode(rig.id, "dev1-impl", { role: "worker", runtime: "claude-code", cwd: repo });
+      const createSpy = vi.fn<(name: string, cwd?: string) => Promise<TmuxResult>>().mockResolvedValue({ ok: true });
+
+      await launcherWith(new SeatSandboxService(db), createSpy).launchNode(rig.id, "dev1-impl");
+
+      expect(createSpy.mock.calls[0]![1]).toBe(repo);
+      expect(fs.existsSync(path.join(tmp, "squad-worktrees"))).toBe(false);
     });
   });
 

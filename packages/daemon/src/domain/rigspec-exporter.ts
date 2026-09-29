@@ -1,6 +1,7 @@
 import type { RigRepository } from "./rig-repository.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { PodRepository } from "./pod-repository.js";
+import type { SeatSandboxService } from "./seat-sandbox-service.js";
 import type {
   LegacyRigSpec, LegacyRigSpecNode, LegacyRigSpecEdge,
   RigSpec, RigSpecPod, RigSpecPodMember, RigSpecPodEdge, RigSpecCrossPodEdge,
@@ -11,6 +12,8 @@ interface RigSpecExporterDeps {
   rigRepo: RigRepository;
   sessionRegistry: SessionRegistry;
   podRepo?: PodRepository;
+  /** A sandboxed seat's node.cwd is its worktree; the export needs the authored cwd and the isolation instead. */
+  sandboxes?: Pick<SeatSandboxService, "get">;
 }
 
 export class RigSpecExporter {
@@ -18,6 +21,7 @@ export class RigSpecExporter {
   private rigRepo: RigRepository;
   private sessionRegistry: SessionRegistry;
   private podRepo: PodRepository | null;
+  private sandboxes: Pick<SeatSandboxService, "get"> | null;
 
   constructor(deps: RigSpecExporterDeps) {
     if (deps.rigRepo.db !== deps.sessionRegistry.db) {
@@ -30,6 +34,7 @@ export class RigSpecExporter {
     this.rigRepo = deps.rigRepo;
     this.sessionRegistry = deps.sessionRegistry;
     this.podRepo = deps.podRepo ?? null;
+    this.sandboxes = deps.sandboxes ?? null;
   }
 
   exportRig(rigId: string): LegacyRigSpec | RigSpec {
@@ -167,6 +172,13 @@ export class RigSpecExporter {
         if (node.sessionSource) member.sessionSource = node.sessionSource;
         const rp = getRestorePolicy(node.id);
         if (rp) member.restorePolicy = rp;
+        // A worktree seat runs in a directory the daemon made; exporting that path would turn the
+        // isolation into a hard-wired cwd on re-import. Export what the author wrote.
+        const sandbox = this.sandboxes?.get(node.id);
+        if (sandbox) {
+          member.cwd = sandbox.repoPath;
+          member.isolation = sandbox.mode;
+        }
         return member;
       });
 

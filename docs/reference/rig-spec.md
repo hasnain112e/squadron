@@ -277,7 +277,31 @@ directory's `CLAUDE.md`, including blocks written by other rigs.
 | `label` | string | no | — | Human-readable member name. Shown in UI when present. |
 | `model` | string | no | — | Model override. Runtime-specific (e.g., `claude-opus-4-6` for Claude Code). |
 | `restore_policy` | string | no | `resume_if_possible` | Restore behavior. One of: `resume_if_possible`, `relaunch_fresh`, `checkpoint_only`. |
+| `isolation` | string | no | `shared` | Where the seat's files live. `shared` runs in `cwd` itself. `worktree` gives the seat its own git worktree and branch at launch; see [Worktree isolation](#worktree-isolation). Not valid on terminal nodes. |
 | `startup` | StartupBlock | no | — | Member-level startup files and actions. Applied only to this member. |
+
+### Worktree isolation
+
+Seats that share a `cwd` share one checkout, so two agents editing the same repository overwrite each other. Set `isolation: worktree` on a member and the daemon gives that seat its own [git worktree](https://git-scm.com/docs/git-worktree) on its own branch when the seat launches.
+
+```yaml
+members:
+  - id: impl
+    agent_ref: "local:agents/impl"
+    profile: default
+    runtime: claude-code
+    cwd: .          # must be inside a git repository that has at least one commit
+    isolation: worktree
+```
+
+- **Where it goes.** The worktree is created next to the repository, at `<repo parent>/squad-worktrees/<repo>/<rig>/<member>`, on the branch `squad/<rig>/<member>` (unsafe characters in the rig or member name become `-`). The branch starts from the repository's `HEAD` at first launch.
+- **Which directory the seat gets.** The same directory as `cwd`, inside the worktree. If `cwd` is `packages/api` in the repository, the seat starts in `packages/api` in its worktree.
+- **What changes.** The seat's recorded `cwd` becomes the worktree, so skill projection, restore, and resume all use it. `rig export` still writes the `cwd` you authored and `isolation: worktree`.
+- **Relaunching.** The worktree is reused on every launch. If its directory was deleted, it is recreated on the same branch, so committed work is kept. Starting a rig again under the same name reuses the worktree its seats had.
+- **What it does not copy.** A worktree is a fresh checkout of tracked files. Untracked and ignored files from your repository, such as `node_modules` or `.env`, are not copied, so a seat that needs them has to install or create them in its own worktree. The agent runtime may also ask you to trust the new directory the first time a seat starts in it.
+- **Failing early.** If `cwd` is not in a git repository, the repository has no commits, or the target directory already exists and is not this seat's worktree, that seat fails to launch with a message saying which, and no session is started.
+- **Nothing is deleted for you.** Tearing a rig down leaves its worktrees and branches in place. `rig sandbox ls` lists them, and `rig sandbox rm <node-id>` removes one. It refuses while the seat is running or the worktree has uncommitted changes unless you pass `--force`, and it deletes the branch only if git reports it fully merged.
+- **When it applies.** `isolation` is read when the seat is created. Adding it to a member of a running rig does not move that seat.
 
 ### Terminal Nodes
 
@@ -564,6 +588,7 @@ These rules are enforced by the validator. A spec that violates any of these wil
 24. Startup action `idempotent` is a required boolean.
 25. Non-idempotent actions must not include `restore` in `applies_on`.
 26. `applies_on` values must be from: `fresh_start`, `restore`.
+27. `isolation` must be one of: `worktree`, `shared`. `worktree` is not valid on terminal nodes.
 
 ---
 

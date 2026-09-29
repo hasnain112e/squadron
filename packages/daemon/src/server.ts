@@ -120,6 +120,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { steeringRoutes } from "./routes/steering.js";
 import { healthSummaryRoutes } from "./routes/health-summary.js";
 import { attentionRoutes } from "./routes/attention.js";
+import { sandboxRoutes } from "./routes/sandboxes.js";
 import { healthRoutes } from "./routes/health.js";
 import { gatewayRoutes } from "./routes/gateway.js";
 import type { StreamStore } from "./domain/stream-store.js";
@@ -166,6 +167,8 @@ export interface AppDeps {
   restoreOrchestrator: RestoreOrchestrator;
   // OPR.0.4.3.20 FR-4 — for refresh-before-serialize on the manual snapshot route.
   resumeMetadataRefresher?: import("./domain/resume-metadata-refresher.js").ResumeMetadataRefresher;
+  /** Seat worktrees created by `isolation: worktree`; `/api/sandboxes` answers 503 when absent. */
+  seatSandboxes?: import("./domain/seat-sandbox-service.js").SeatSandboxService;
   rigSpecExporter: RigSpecExporter;
   rigSpecPreflight: RigSpecPreflight;
   rigInstantiator: RigInstantiator;
@@ -509,6 +512,7 @@ export function createApp(deps: AppDeps): Hono {
     c.set("providerService" as never, deps.providerService);
     c.set("restoreOrchestrator" as never, deps.restoreOrchestrator);
     c.set("resumeMetadataRefresher" as never, deps.resumeMetadataRefresher);
+    c.set("seatSandboxes" as never, deps.seatSandboxes);
     c.set("rigSpecExporter" as never, deps.rigSpecExporter);
     c.set("rigSpecPreflight" as never, deps.rigSpecPreflight);
     c.set("rigInstantiator" as never, deps.rigInstantiator);
@@ -794,6 +798,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route("/api/health-summary", healthSummaryRoutes());
   app.route("/api/health", healthRoutes());
   app.route("/api/attention", attentionRoutes());
+  app.route("/api/sandboxes", sandboxRoutes());
   app.route("/api/health-diagnosis", healthDiagnosisRoutes());
   // S10 — gateway subsystem admin (slack enable/disable with the seeding rule preserved).
   app.route("/api/gateway", gatewayRoutes());
