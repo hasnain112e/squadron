@@ -92,9 +92,10 @@ import { scopedOperatingPostureSchema } from "./migrations/080_scoped_operating_
 import { seatDeliveryGuardSchema } from "./migrations/087_seat_delivery_guard.js";
 import { nodePermissionSelectionsSchema } from "./migrations/088_node_permission_selections.js";
 import { classificationIdentityProvenanceSchema } from "./migrations/089_classification_identity_provenance.js";
+import { nodeSandboxesSchema } from "./migrations/090_node_sandboxes.js";
 import type { Migration } from "./migrate.js";
 
-/** Ordered 001→089 (S02 086/089, S09 087, S03 088). */
+/** Ordered 001→090 (S02 086/089, S09 087, S03 088, seat sandboxes 090). */
 export const ALL_MIGRATIONS: Migration[] = [
   coreSchema,
   bindingsSessionsSchema,
@@ -185,4 +186,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   seatDeliveryGuardSchema,
   nodePermissionSelectionsSchema,
   classificationIdentityProvenanceSchema,
+  nodeSandboxesSchema,
 ];

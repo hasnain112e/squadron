@@ -10,6 +10,7 @@ import { checkRunningNameGuard, makeRunningSessionCounter } from "./running-name
 import type { SessionRegistry } from "./session-registry.js";
 import type { EventBus } from "./event-bus.js";
 import type { NodeLauncher } from "./node-launcher.js";
+import type { SeatSandboxService } from "./seat-sandbox-service.js";
 import type { PreflightSpecContext, RigSpecPreflight } from "./rigspec-preflight.js";
 import { deriveCanonicalSessionName, validateSessionComponents } from "./session-name.js";
 import { LegacyRigSpecSchema as RigSpecSchema } from "./rigspec-schema.js"; // TODO: AS-T08b — migrate to pod-aware RigSpec
@@ -379,6 +380,9 @@ interface PodInstantiatorDeps {
   /** S20 P4 — materializes the selected Claude continuity policy by
    *  registering jobs in the existing watchdog engine after startup succeeds. */
   continuityPolicyMaterializer?: Pick<ContinuityPolicyMaterializer, "arm">;
+  /** Gives members that declare `isolation: worktree` their own git worktree. Production wires it;
+   *  a member that asks for isolation without it is refused rather than silently left shared. */
+  sandboxes?: SeatSandboxService;
 }
 
 export interface MaterializeResult {
@@ -1175,7 +1179,7 @@ export class PodRigInstantiator {
     const initialRefusal = eligible();
     if (initialRefusal) return refuse(initialRefusal);
 
-    const retainedFields = new Set(["id", "label", "agent_ref", "profile", "runtime", "model", "cwd", "role", "codex_config_profile", "permission_policy", "restore_policy"]);
+    const retainedFields = new Set(["id", "label", "agent_ref", "profile", "runtime", "model", "cwd", "role", "codex_config_profile", "permission_policy", "restore_policy", "isolation"]);
     if (Object.keys(memberFragment).some(key => !retainedFields.has(key))) return refuse("Retry accepts only retained member fields; topology and startup overrides require a separate change.");
     const rawSpec = { version: "0.2", name: rig.rig.name, pods: [{ id: podRow.namespace, label: podRow.label, members: [memberFragment], edges: [] }], edges: [] };
     const validation = PodRigSpecSchema.validate(rawSpec);
@@ -1189,16 +1193,19 @@ export class PodRigInstantiator {
       return refuse("First-start retry does not accept unretained member startup, continuity or session-source overrides.");
     }
     const same = (a: unknown, b: unknown) => (a ?? null) === (b ?? null);
+    // A worktree seat's node.cwd is the worktree the daemon made, so the authored cwd lives on its sandbox record.
+    const sandbox = this.deps.sandboxes?.get(nodeId) ?? null;
     if (`${pod.id}.${member.id}` !== node.logicalId || !same(member.agentRef, node.agentRef) || !same(member.profile, node.profile)
       || !same(member.runtime, node.runtime) || !same(member.role, node.role) || !same(member.label, node.label) || !same(member.codexConfigProfile, node.codexConfigProfile)
-      || !same(member.permissionPolicy, node.permissionPolicy)) return refuse("Member source disagrees with the retained seat identity or policy.");
+      || !same(member.permissionPolicy, node.permissionPolicy)
+      || (member.isolation === "worktree") !== (sandbox !== null)) return refuse("Member source disagrees with the retained seat identity or policy.");
     const resolved = resolveAgentRef(member.agentRef, rigRoot, this.deps.fsOps);
     if (!resolved.ok) return refuse(resolved.code === "validation_failed" ? resolved.errors.join("; ") : resolved.error);
     if (!node.resolvedSpecHash || resolved.resolved.hash !== node.resolvedSpecHash) return refuse("Agent source hash differs from the failed first start.");
     const config = resolveNodeConfig({ baseSpec: resolved.resolved, importedSpecs: resolved.imports, collisions: resolved.collisions,
       profileName: member.profile, specRoot: rigRoot, member, pod, rig: rigSpec, skillsRoot: this.resolveSkillsRoot(), ...this.systemWorldResolutionContext() });
     if (!config.ok) return refuse(config.errors.join("; "));
-    if (!same(config.config.model, node.model) || !same(config.config.cwd, node.cwd) || !same(config.config.restorePolicy, node.restorePolicy)) {
+    if (!same(config.config.model, node.model) || !same(config.config.cwd, sandbox?.repoPath ?? node.cwd) || !same(config.config.restorePolicy, node.restorePolicy)) {
       return refuse("Resolved model, cwd or restore policy differs from the failed first start.");
     }
     const preflight = await preflightValidatedSpec(rigSpec, { rigRoot, fsOps: this.deps.fsOps, skillsRoot: this.resolveSkillsRoot(),
@@ -1447,6 +1454,9 @@ export class PodRigInstantiator {
           // null, and resolveRestorePosture fell through to rig full_bypass.)
           const bootstrapAttachment = this.resolveMemberPolicyAttachment(member.permissionPolicy, rigSpec.permissionPolicy, rigRoot);
           if (bootstrapAttachment) this.persistNodePolicyProvenanceStrict(node.id, bootstrapAttachment);
+          // Mirrors createMemberNode: without this, `rig up <spec>` would drop `isolation: worktree`
+          // while add_member honored it.
+          this.requestSandbox({ nodeId: node.id, rigId, qualifiedId, member, repoPath: configResult.config.cwd });
           return node.id;
         });
         let nodeId: string;
@@ -1737,6 +1747,25 @@ export class PodRigInstantiator {
   }
 
   /**
+   * Record that a member which declared `isolation: worktree` wants a sandbox. Database only, so it
+   * runs inside the node-creation transaction; the worktree itself is made when the seat launches.
+   * Every agent node-creation site calls this, or `rig up` and `add_member` would disagree.
+   */
+  private requestSandbox(input: {
+    nodeId: string;
+    rigId: string;
+    qualifiedId: string;
+    member: RigSpecPodMember;
+    repoPath: string;
+  }): void {
+    if (input.member.isolation !== "worktree") return;
+    if (!this.deps.sandboxes) {
+      throw new Error(`${input.qualifiedId}: isolation: worktree needs the seat sandbox service, which this daemon does not have.`);
+    }
+    this.deps.sandboxes.request({ nodeId: input.nodeId, rigId: input.rigId, seat: input.qualifiedId, repoPath: input.repoPath });
+  }
+
+  /**
    * create-node primitive (OPR.0.3.3.24): mint a fresh node row for one member
    * (fresh stable id + fresh qualified logical id, `pod_id` = the given pod) plus
    * the matching `node.added` event. Extracted from materialize's loop so the
@@ -1770,6 +1799,7 @@ export class PodRigInstantiator {
       profile: input.member.profile,
       label: input.member.label,
     });
+    this.requestSandbox({ nodeId: node.id, rigId: input.rigId, qualifiedId: input.qualifiedId, member: input.member, repoPath: effectiveCwd });
     const event = this.deps.eventBus.persistWithinTransaction({
       type: "node.added",
       rigId: input.rigId,
@@ -1869,7 +1899,7 @@ export class PodRigInstantiator {
       return { status: "failed", error: msg };
     }
 
-    const configResult = input.configResult ?? resolveNodeConfig({
+    let configResult = input.configResult ?? resolveNodeConfig({
       baseSpec: resolveResult.resolved,
       importedSpecs: resolveResult.imports,
       collisions: resolveResult.collisions,
@@ -1884,6 +1914,18 @@ export class PodRigInstantiator {
     });
     if (!configResult.ok) {
       return { status: "failed", error: configResult.errors.join("; ") };
+    }
+
+    // `isolation: worktree`: the seat runs in its own git worktree, so the skill projection, the launch
+    // and the startup files below must all see that directory as its cwd, not the authored one.
+    try {
+      const sandboxCwd = await this.deps.sandboxes?.provision(input.nodeId);
+      if (sandboxCwd) {
+        this.deps.rigRepo.setNodeCwd(input.nodeId, sandboxCwd);
+        configResult = { ...configResult, config: { ...configResult.config, cwd: sandboxCwd } };
+      }
+    } catch (error) {
+      return { status: "failed", error: error instanceof Error ? error.message : String(error) };
     }
 
     this.updateNodeResolvedConfig(input.nodeId, configResult.config);

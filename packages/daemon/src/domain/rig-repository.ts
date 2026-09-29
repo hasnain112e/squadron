@@ -446,6 +446,15 @@ export class RigRepository {
     return result.changes > 0;
   }
 
+  /** Points a node at the directory its seat actually runs in. A seat with `isolation: worktree`
+   *  is repointed at its worktree, so projection, restore and snapshots all follow it. */
+  setNodeCwd(nodeId: string, cwd: string): boolean {
+    const result = this.db
+      .prepare("UPDATE nodes SET cwd = ? WHERE id = ?")
+      .run(cwd, nodeId);
+    return result.changes > 0;
+  }
+
   addEdge(rigId: string, sourceId: string, targetId: string, kind: string): Edge {
     const id = ulid();
     this.db

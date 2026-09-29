@@ -54,6 +54,7 @@ import { reviewReadIndexesSchema } from "../../src/db/migrations/083_review_read
 import { inventoryEventIndexesSchema } from "../../src/db/migrations/084_inventory_event_indexes.js";
 import { rigClaudeManagedBlockFileSchema } from "../../src/db/migrations/085_rig_claude_managed_block_file.js";
 import { nodePermissionSelectionsSchema } from "../../src/db/migrations/088_node_permission_selections.js";
+import { nodeSandboxesSchema } from "../../src/db/migrations/090_node_sandboxes.js";
 import { rigPolicySchema } from "../../src/db/migrations/041_rig_policy.js";
 import { rigArchiveSchema } from "../../src/db/migrations/042_rig_archive.js";
 import { resumeProvenanceSchema } from "../../src/db/migrations/043_resume_provenance.js";
@@ -87,6 +88,7 @@ import { SessionRegistry } from "../../src/domain/session-registry.js";
 import { EventBus } from "../../src/domain/event-bus.js";
 import { QueueRepository } from "../../src/domain/queue-repository.js";
 import { NodeLauncher } from "../../src/domain/node-launcher.js";
+import type { SeatSandboxService } from "../../src/domain/seat-sandbox-service.js";
 import { SnapshotRepository } from "../../src/domain/snapshot-repository.js";
 import { CheckpointStore } from "../../src/domain/checkpoint-store.js";
 import { SnapshotCapture } from "../../src/domain/snapshot-capture.js";
@@ -116,7 +118,7 @@ import fs from "node:fs";
 
 /** Seam B R6: the canonical full-fixture migration list, exported so file-backed
  *  DB-reopen tests migrate IDENTICALLY to createFullTestDb. */
-export const migrationsForFullTestDb = [coreSchema, bindingsSessionsSchema, eventsSchema, snapshotsSchema, checkpointsSchema, resumeMetadataSchema, nodeSpecFieldsSchema, packagesSchema, installJournalSchema, journalSeqSchema, bootstrapSchema, discoverySchema, discoveryFkFix, agentspecRebootSchema, startupContextSchema, chatMessagesSchema, podNamespaceSchema, contextUsageSchema, externalCliAttachmentSchema, rigServicesSchema, seatHandoverObservabilitySchema, nodeCodexConfigProfileSchema, nodePermissionPolicySchema, rigPermissionPolicySchema, nodePolicyProvenanceSchema, rigPolicyProvenanceSchema, streamItemsSchema, queueItemsSchema, queueTransitionsSchema, rigPolicySchema, rigArchiveSchema, resumeProvenanceSchema, resumeVerificationSchema, seatIdentityVerdictsSchema, selfHostIdentitySchema, occupantTenuresSchema, daemonLifecycleSchema, watchdogJobsSchema, occupantGenerationStampsSchema, projectionManifestSchema, watchdogTargetGenerationSchema, appliedLaunchObservationsSchema, appliedLaunchObservationInvalidationsSchema, threadSeatMapSchema, queueTransitionWakesSchema, nodeSessionSourceSchema, scopedOperatingPostureSchema, humanNotificationIntentSchema, reviewReadIndexesSchema, inventoryEventIndexesSchema, rigClaudeManagedBlockFileSchema, nodePermissionSelectionsSchema];
+export const migrationsForFullTestDb = [coreSchema, bindingsSessionsSchema, eventsSchema, snapshotsSchema, checkpointsSchema, resumeMetadataSchema, nodeSpecFieldsSchema, packagesSchema, installJournalSchema, journalSeqSchema, bootstrapSchema, discoverySchema, discoveryFkFix, agentspecRebootSchema, startupContextSchema, chatMessagesSchema, podNamespaceSchema, contextUsageSchema, externalCliAttachmentSchema, rigServicesSchema, seatHandoverObservabilitySchema, nodeCodexConfigProfileSchema, nodePermissionPolicySchema, rigPermissionPolicySchema, nodePolicyProvenanceSchema, rigPolicyProvenanceSchema, streamItemsSchema, queueItemsSchema, queueTransitionsSchema, rigPolicySchema, rigArchiveSchema, resumeProvenanceSchema, resumeVerificationSchema, seatIdentityVerdictsSchema, selfHostIdentitySchema, occupantTenuresSchema, daemonLifecycleSchema, watchdogJobsSchema, occupantGenerationStampsSchema, projectionManifestSchema, watchdogTargetGenerationSchema, appliedLaunchObservationsSchema, appliedLaunchObservationInvalidationsSchema, threadSeatMapSchema, queueTransitionWakesSchema, nodeSessionSourceSchema, scopedOperatingPostureSchema, humanNotificationIntentSchema, reviewReadIndexesSchema, inventoryEventIndexesSchema, rigClaudeManagedBlockFileSchema, nodePermissionSelectionsSchema, nodeSandboxesSchema];
 
 /**
  * P24 — the DECLARED exclusions for {@link migrationsForFullTestDb}. That list is deliberately a
@@ -253,6 +255,8 @@ export function createTestApp(
       exists: (p: string) => boolean;
       readFile: (p: string) => string;
     };
+    /** Wire seat sandboxes (`isolation: worktree`) into the launcher, the pod instantiator and the exporter. Default: none. */
+    sandboxes?: SeatSandboxService;
     /** Managed Claude activity-hook delivery asset paths, forwarded to the PodRigInstantiator
      *  (defaults to daemon-shipped assets). Tests inject fixtures to exercise the nonfatal
      *  delivery-gap warning through the real /api/up route. */
@@ -274,7 +278,7 @@ export function createTestApp(
   const tmux = opts?.tmux ?? mockTmuxAdapter();
   const cmux = opts?.cmux ?? unavailableCmuxAdapter();
   const transcriptStore = new TranscriptStore("/tmp/openrig-test-transcripts");
-  const nodeLauncher = new NodeLauncher({ db, rigRepo, sessionRegistry, eventBus, tmuxAdapter: tmux });
+  const nodeLauncher = new NodeLauncher({ db, rigRepo, sessionRegistry, eventBus, tmuxAdapter: tmux, sandboxes: opts?.sandboxes });
   const snapshotRepo = new SnapshotRepository(db);
   const checkpointStore = new CheckpointStore(db);
   const snapshotCapture = new SnapshotCapture({ db, rigRepo, sessionRegistry, eventBus, snapshotRepo, checkpointStore });
@@ -286,7 +290,7 @@ export function createTestApp(
     ...(opts?.listProcesses ? { listProcesses: opts.listProcesses } : {}),
   });
   const podRepo = new PodRepository(db);
-  const rigSpecExporter = new RigSpecExporter({ rigRepo, sessionRegistry, podRepo });
+  const rigSpecExporter = new RigSpecExporter({ rigRepo, sessionRegistry, podRepo, sandboxes: opts?.sandboxes });
   const exec: ExecFn = async () => "";
   const rigSpecPreflight = new RigSpecPreflight({ rigRepo, tmuxAdapter: tmux, exec, cmuxExec: exec });
   const rigInstantiator = new RigInstantiator({ db, rigRepo, sessionRegistry, eventBus, nodeLauncher, preflight: rigSpecPreflight });
@@ -330,6 +334,7 @@ export function createTestApp(
     fsOps: opts?.podInstantiatorFsOps ?? { readFile: () => "", exists: () => false },
     claudeActivityAssets: opts?.claudeActivityAssets,
     adapters,
+    sandboxes: opts?.sandboxes,
   });
 
   const bootstrapOrchestrator = new BootstrapOrchestrator({
@@ -400,7 +405,7 @@ export function createTestApp(
 
   const app = createApp({
     rigRepo, sessionRegistry, eventBus, nodeLauncher, startupOrchestrator, tmuxAdapter: tmux, cmuxAdapter: cmux,
-    snapshotCapture, snapshotRepo, restoreOrchestrator,
+    snapshotCapture, snapshotRepo, restoreOrchestrator, seatSandboxes: opts?.sandboxes,
     rigSpecExporter, rigSpecPreflight, rigInstantiator,
     packageRepo, installRepo, installEngine, installVerifier,
     bootstrapOrchestrator, bootstrapRepo,

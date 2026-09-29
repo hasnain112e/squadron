@@ -378,6 +378,34 @@ describe("RigSpec schema (pod-aware)", () => {
     expect(result.errors[0]).toMatch(/restore_policy.*must be one of/);
   });
 
+  it("member isolation accepts worktree and shared, and normalizes it", () => {
+    for (const mode of ["worktree", "shared"] as const) {
+      const rig = structuredClone(VALID_RIG);
+      (rig.pods[0]!.members[0] as Record<string, unknown>)["isolation"] = mode;
+      expect(RigSpecSchema.validate(rig).valid).toBe(true);
+      expect(RigSpecSchema.normalize(rig).pods[0]!.members[0]!.isolation).toBe(mode);
+    }
+    expect(RigSpecSchema.normalize(structuredClone(VALID_RIG)).pods[0]!.members[0]!.isolation).toBeUndefined();
+  });
+
+  it("member isolation rejects unknown modes", () => {
+    const rig = structuredClone(VALID_RIG);
+    (rig.pods[0]!.members[0] as Record<string, unknown>)["isolation"] = "container";
+    const result = RigSpecSchema.validate(rig);
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toMatch(/isolation.*must be one of worktree, shared/);
+  });
+
+  it("member isolation worktree is rejected on terminal members", () => {
+    const rig = structuredClone(VALID_RIG);
+    Object.assign(rig.pods[0]!.members[0] as Record<string, unknown>, {
+      runtime: "terminal", agent_ref: "builtin:terminal", profile: "none", isolation: "worktree",
+    });
+    const result = RigSpecSchema.validate(rig);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /isolation.*not valid on terminal members/.test(e))).toBe(true);
+  });
+
   // R6: member agent_ref "github:foo/bar" rejected
   it("member agent_ref github: rejected", () => {
     const rig = structuredClone(VALID_RIG);

@@ -22,6 +22,7 @@ import { resolveExternal } from "./domain/gateway/external-admission.js";
 import { loadHumanRegistry } from "./domain/gateway/human-registry.js";
 import { EventBus } from "./domain/event-bus.js";
 import { NodeLauncher } from "./domain/node-launcher.js";
+import { SeatSandboxService } from "./domain/seat-sandbox-service.js";
 import { TmuxOptionDefaultsApplier } from "./domain/tmux-option-defaults.js";
 import { TmuxAdapter } from "./adapters/tmux.js";
 import { CmuxAdapter } from "./adapters/cmux.js";
@@ -504,6 +505,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
       }
     },
   });
+  const seatSandboxes = new SeatSandboxService(db);
   const nodeLauncher = new NodeLauncher({
     db,
     rigRepo,
@@ -513,6 +515,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     transcriptStore,
     sessionEnv: launchSessionEnv,
     tmuxOptionDefaults,
+    sandboxes: seatSandboxes,
   });
 
   const snapshotRepo = new SnapshotRepository(db);
@@ -594,7 +597,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   }
 
   const podRepo = new PodRepository(db);
-  const rigSpecExporter = new RigSpecExporter({ rigRepo, sessionRegistry, podRepo });
+  const rigSpecExporter = new RigSpecExporter({ rigRepo, sessionRegistry, podRepo, sandboxes: seatSandboxes });
   const rigSpecPreflight = new RigSpecPreflight({
     rigRepo, tmuxAdapter, exec: opts?.tmuxExec ?? execCommand, cmuxExec: opts?.cmuxExec ?? execCommand,
   });
@@ -881,6 +884,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
       });
     },
     skillReconciler: reconcileSkillLoadout,
+    sandboxes: seatSandboxes,
   });
 
   const podBundleSourceResolver = new PodBundleSourceResolver();
@@ -1073,6 +1077,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     }),
     restoreOrchestrator,
     resumeMetadataRefresher, // OPR.0.4.3.20 FR-4 — manual snapshot refresh-before-serialize
+    seatSandboxes,
     rigSpecExporter,
     rigSpecPreflight,
     rigInstantiator,

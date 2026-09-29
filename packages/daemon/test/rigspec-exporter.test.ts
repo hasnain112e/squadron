@@ -19,6 +19,7 @@ import { LegacyRigSpecCodec as RigSpecCodec } from "../src/domain/rigspec-codec.
 import { RigSpecSchema as PodRigSpecSchema } from "../src/domain/rigspec-schema.js";
 import { RigSpecCodec as PodRigSpecCodec } from "../src/domain/rigspec-codec.js";
 import { PodRepository } from "../src/domain/pod-repository.js";
+import { SeatSandboxService } from "../src/domain/seat-sandbox-service.js";
 import { RigNotFoundError } from "../src/domain/errors.js";
 import { createFullTestDb } from "./helpers/test-app.js";
 
@@ -349,5 +350,25 @@ describe("RigSpecExporter (pod-aware)", () => {
     const parsed = PodRigSpecCodec.parse(yaml);
     const result = PodRigSpecSchema.validate(parsed);
     expect(result.valid).toBe(true);
+  });
+
+  it("exports a worktree seat's authored cwd and isolation, not the worktree the daemon made", () => {
+    const { rig, n1 } = seedPodRig();
+    const sandboxes = new SeatSandboxService(db);
+    sandboxes.request({ nodeId: n1.id, rigId: rig.id, seat: "dev.impl", repoPath: "/repo" });
+    // What a launch does: the node now points at its worktree.
+    rigRepo.setNodeCwd(n1.id, "/squad-worktrees/repo/pod-test/dev.impl");
+    const sandboxedExporter = new RigSpecExporter({ rigRepo, sessionRegistry, podRepo, sandboxes });
+
+    const spec = sandboxedExporter.exportRig(rig.id) as import("../src/domain/types.js").RigSpec;
+
+    const members = spec.pods.find((p) => p.id === "dev")!.members;
+    expect(members.find((m) => m.id === "impl")).toMatchObject({ cwd: "/repo", isolation: "worktree" });
+    expect(members.find((m) => m.id === "qa")).toMatchObject({ cwd: "." });
+    expect(members.find((m) => m.id === "qa")!.isolation).toBeUndefined();
+
+    const parsed = PodRigSpecCodec.parse(PodRigSpecCodec.serialize(spec));
+    expect(PodRigSpecSchema.validate(parsed).valid).toBe(true);
+    expect(PodRigSpecSchema.normalize(parsed as Record<string, unknown>).pods[0]!.members[0]!.isolation).toBe("worktree");
   });
 });

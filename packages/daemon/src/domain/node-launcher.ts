@@ -11,6 +11,7 @@ import {
   getTranscriptRotationOptionsFromEnv,
 } from "./transcript-rotation.js";
 import type { TmuxOptionDefaultsApplier } from "./tmux-option-defaults.js";
+import type { SeatSandboxService } from "./seat-sandbox-service.js";
 import { observeSolePane, paneObservationVerdict } from "./pane-binding-observation.js";
 import { SeatIdentityStore } from "./seat-identity-store.js";
 import type { OccupantKind } from "./session-registry.js";
@@ -56,6 +57,11 @@ interface NodeLauncherDeps {
    * skips option application entirely.
    */
   tmuxOptionDefaults?: TmuxOptionDefaultsApplier;
+  /**
+   * Gives a seat that declared `isolation: worktree` its own git worktree at launch. When omitted
+   * (most unit tests), every seat launches in its recorded cwd.
+   */
+  sandboxes?: SeatSandboxService;
 }
 
 export class NodeLauncher {
@@ -68,6 +74,7 @@ export class NodeLauncher {
   private sessionEnv: Record<string, string>;
   private defaultSilenceWindowSeconds: number;
   private tmuxOptionDefaults: TmuxOptionDefaultsApplier | null;
+  private sandboxes: SeatSandboxService | null;
 
   constructor(deps: NodeLauncherDeps) {
     // Hard runtime invariant: all domain services must share the same db handle.
@@ -91,6 +98,7 @@ export class NodeLauncher {
     this.sessionEnv = compactEnv(deps.sessionEnv ?? {});
     this.defaultSilenceWindowSeconds = deps.defaultSilenceWindowSeconds ?? 3;
     this.tmuxOptionDefaults = deps.tmuxOptionDefaults ?? null;
+    this.sandboxes = deps.sandboxes ?? null;
   }
 
   async launchNode(
@@ -128,6 +136,19 @@ export class NodeLauncher {
       };
     }
 
+    // 2b. A seat that asked for `isolation: worktree` runs in its own worktree, whichever path launched it
+    // (first boot, restore, relaunch). Provisioning is idempotent, and node.cwd follows the worktree so
+    // projection and later restores use the same directory.
+    let sandboxCwd: string | null = null;
+    if (this.sandboxes) {
+      try {
+        sandboxCwd = await this.sandboxes.provision(node.id);
+      } catch (error) {
+        return { ok: false, code: "sandbox_failed", message: error instanceof Error ? error.message : String(error) };
+      }
+      if (sandboxCwd) this.rigRepo.setNodeCwd(node.id, sandboxCwd);
+    }
+
     // 3. Reserve the source-bound occupant generation before the process starts. Reservation is
     // side-effect-free and fail-open: an unavailable ledger yields null and the launch remains valid.
     const occupantGeneration = this.sessionRegistry.reserveOccupantGeneration();
@@ -141,7 +162,7 @@ export class NodeLauncher {
       ...this.sessionEnv,
       OPENRIG_OCCUPANT_GENERATION: occupantGeneration ?? undefined,
     });
-    const sessionCwd = opts?.cwd ?? node.cwd ?? undefined;
+    const sessionCwd = sandboxCwd ?? opts?.cwd ?? node.cwd ?? undefined;
     const tmuxResult = await this.tmuxAdapter.createSession(sessionName, sessionCwd, openRigEnv);
     if (!tmuxResult.ok) {
       return { ok: false, code: tmuxResult.code, message: tmuxResult.message };

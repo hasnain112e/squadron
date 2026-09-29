@@ -245,6 +245,8 @@ piping a command so a formatter cannot hide its failing exit.
 | `plugin` | Inspect plugins (read-only) — list, show, used-by, validate |
 | `scope` | Scope tree primitive — missions, slices, sub-slices |
 | `policy` | Operator context-mode bindings (sleep/desk/mobile/away/focus/debug) |
+| `sandbox` | List or remove the git worktrees given to seats by `isolation: worktree` |
+| `swarm` | Preview a multi-agent swarm plan for a mission (plan only; launches nothing) |
 
 ## Core Daemon and System Commands
 
@@ -932,6 +934,17 @@ Usage: `rig shrink <rigId> <podRef> [--json]`
 Notes:
 - Removes an entire pod from a running rig.
 - `podRef` can be a pod namespace or pod ID.
+
+### `rig sandbox`
+
+Usage: `rig sandbox ls [--all] [--json]` and `rig sandbox rm <node-id> [--force]`
+
+Notes:
+- Manages the git worktrees that `isolation: worktree` gives to seats (see [`docs/reference/rig-spec.md`](../reference/rig-spec.md#worktree-isolation)). `squad sandbox` is the same command.
+- `ls` lists recorded sandboxes with node id, rig, seat, state (`requested`, `provisioned`), branch and worktree path. It includes sandboxes whose rig was torn down, because tearing a rig down never deletes a worktree. `--all` also lists sandboxes already removed with `rm`.
+- `rm` removes one seat's worktree. It refuses while the seat has a running session or the worktree has uncommitted changes; `--force` overrides both.
+- `rm` deletes the seat's branch only when git reports it fully merged (`git branch -d`). A branch with unmerged commits is kept and the command says so.
+- Removing a sandbox does not stop or change the seat. The next launch of a seat that still declares `isolation: worktree` makes a fresh worktree, reusing the branch if it was kept.
 
 ## Identity, Communication, and Context
 

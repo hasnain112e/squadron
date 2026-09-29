@@ -38,6 +38,7 @@ export const VALID_EDGE_KINDS = new Set(["delegates_to", "spawned_by", "can_obse
 export const SPEC_VALIDATION_CAPABILITIES: ReadonlySet<string> = new Set(["model-pin-canonicalization"]);
 const VALID_SYNC_TRIGGERS = new Set(["pre_compaction", "pre_shutdown", "manual", "milestone"]);
 const VALID_RESTORE_POLICIES = new Set(["resume_if_possible", "relaunch_fresh", "checkpoint_only"]);
+const VALID_ISOLATION_MODES = new Set(["worktree", "shared"]);
 const VALID_IMPORT_PREFIXES = ["local:", "path:"];
 const VALID_SERVICES_KIND = new Set(["compose"]);
 const VALID_DOWN_POLICIES = new Set(["leave_running", "down", "down_and_volumes"]);
@@ -51,7 +52,7 @@ const RIG_KEYS = new Set([
 const POD_KEYS = new Set(["id", "label", "summary", "continuity_policy", "startup", "members", "edges"]);
 const MEMBER_KEYS = new Set([
   "id", "label", "agent_ref", "profile", "runtime", "codex_config_profile",
-  "model", "role", "permission_policy", "cwd", "restore_policy",
+  "model", "role", "permission_policy", "cwd", "restore_policy", "isolation",
   "compaction_strategy", "mechanic", "startup", "session_source", "starter_ref",
 ]);
 const EDGE_KEYS = new Set(["kind", "from", "to"]);
@@ -534,6 +535,15 @@ function validateMember(member: Record<string, unknown>, index: number, podPrefi
   if (member["restore_policy"] !== undefined && member["restore_policy"] !== null) {
     if (!VALID_RESTORE_POLICIES.has(member["restore_policy"] as string)) {
       errors.push(`${prefix}.restore_policy: must be one of ${[...VALID_RESTORE_POLICIES].join(", ")} (got "${member["restore_policy"]}")`);
+    }
+  }
+
+  // isolation: closed set. `worktree` gives the seat its own git worktree and branch at launch.
+  if (member["isolation"] !== undefined && member["isolation"] !== null) {
+    if (!VALID_ISOLATION_MODES.has(member["isolation"] as string)) {
+      errors.push(`${prefix}.isolation: must be one of ${[...VALID_ISOLATION_MODES].join(", ")} (got "${member["isolation"]}")`);
+    } else if (member["isolation"] === "worktree" && isTerminalRuntime) {
+      errors.push(`${prefix}.isolation: "worktree" is not valid on terminal members (a terminal node is not an agent seat)`);
     }
   }
 
@@ -1128,6 +1138,7 @@ function normalizePod(raw: Record<string, unknown>): RigSpecPod {
     permissionPolicy: m["permission_policy"] as string | undefined,
     cwd: m["cwd"] as string,
     restorePolicy: m["restore_policy"] as string | undefined,
+    isolation: (m["isolation"] ?? undefined) as "worktree" | "shared" | undefined,
     // OPR.0.5.6.20 A5 — aliases normalize at ingestion; absent stays undefined so the
     // resolver's F-6 default remains the one authority for absence.
     compactionStrategy: m["compaction_strategy"] !== undefined

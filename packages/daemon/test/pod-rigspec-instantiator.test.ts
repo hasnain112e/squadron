@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -9,6 +9,7 @@ import { PodRepository } from "../src/domain/pod-repository.js";
 import { SessionRegistry } from "../src/domain/session-registry.js";
 import { EventBus } from "../src/domain/event-bus.js";
 import { NodeLauncher } from "../src/domain/node-launcher.js";
+import { SeatSandboxService } from "../src/domain/seat-sandbox-service.js";
 import { StartupOrchestrator } from "../src/domain/startup-orchestrator.js";
 import { PodRigInstantiator } from "../src/domain/rigspec-instantiator.js";
 import { ContinuityPolicyMaterializer } from "../src/domain/continuity-policy-materializer.js";
@@ -73,6 +74,7 @@ describe("PodRigInstantiator", () => {
     onboardingEnabledResolver?: () => boolean,
     continuityPolicyMaterializer?: Pick<ContinuityPolicyMaterializer, "arm">,
     extraDeps?: Record<string, unknown>,
+    withSandboxes = false,
   ) {
     const db = createFullTestDb();
     const rigRepo = new RigRepository(db);
@@ -80,7 +82,8 @@ describe("PodRigInstantiator", () => {
     const sessionRegistry = new SessionRegistry(db);
     const eventBus = new EventBus(db);
     const tmux = mockTmux();
-    const nodeLauncher = new NodeLauncher({ db, rigRepo, sessionRegistry, eventBus, tmuxAdapter: tmux });
+    const sandboxes = new SeatSandboxService(db);
+    const nodeLauncher = new NodeLauncher({ db, rigRepo, sessionRegistry, eventBus, tmuxAdapter: tmux, ...(withSandboxes ? { sandboxes } : {}) });
     const startupOrch = new StartupOrchestrator({ db, sessionRegistry, eventBus, tmuxAdapter: tmux });
     const adapter = mockAdapter();
     const codexAdapter = mockAdapter("codex");
@@ -94,11 +97,12 @@ describe("PodRigInstantiator", () => {
       ...(topologyRootResolver ? { topologyRootResolver } : {}),
       ...(onboardingEnabledResolver ? { onboardingEnabledResolver } : {}),
       ...(continuityPolicyMaterializer ? { continuityPolicyMaterializer } : {}),
+      ...(withSandboxes ? { sandboxes } : {}),
       ...(extraDeps ?? {}),
     };
     const inst = new PodRigInstantiator(instDeps);
 
-    return { db, rigRepo, podRepo, sessionRegistry, eventBus, inst, adapter, codexAdapter, tmux };
+    return { db, rigRepo, podRepo, sessionRegistry, eventBus, inst, adapter, codexAdapter, tmux, sandboxes };
   }
 
   // T1: valid rig instantiates pods + nodes + edges
@@ -205,6 +209,121 @@ describe("PodRigInstantiator", () => {
       expect(planArg.cwd).toBe("/workspace/project");
     }
     db.close();
+  });
+
+  describe("isolation: worktree", { timeout: 30_000 }, () => {
+    let tmp: string;
+    let repo: string;
+    let root: string;
+    let files: Record<string, string>;
+    // A real rig root: the suite-wide RIG_ROOT is a POSIX path that the mock filesystem cannot match on Windows.
+    const boot = (withSandboxes = true) => setup(files, undefined, undefined, undefined, undefined, undefined, withSandboxes);
+
+    beforeEach(() => {
+      tmp = fs.realpathSync.native(fs.mkdtempSync(nodePath.join(os.tmpdir(), "squad-inst-")));
+      root = nodePath.join(tmp, "rig");
+      files = { [nodePath.join(root, "agents", "impl", "agent.yaml")]: agentYaml("impl") };
+      repo = nodePath.join(tmp, "repo");
+      fs.mkdirSync(repo);
+      execFileSync("git", ["-C", repo, "init", "-q", "-b", "main"]);
+      execFileSync("git", ["-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-q", "-m", "base"]);
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
+    const member = (id: string, isolation?: "worktree" | "shared") =>
+      ({ id, agentRef: "local:agents/impl", profile: "default", runtime: "claude-code", cwd: ".", ...(isolation ? { isolation } : {}) });
+    const specWith = (...members: ReturnType<typeof member>[]) =>
+      RigSpecCodec.serialize(makeRigSpec({ pods: [{ id: "dev", label: "Dev", members, edges: [] }] }));
+    const calls = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.calls;
+
+    it("rig up starts the member in its own worktree, and projection and the harness see it", async () => {
+      const { db, rigRepo, sandboxes, inst, adapter, tmux } = boot();
+
+      const result = await inst.instantiate(specWith(member("impl", "worktree")), root, { cwdOverride: repo });
+
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) return;
+      const worktree = nodePath.join(tmp, "squad-worktrees", "repo", "test-rig", "dev.impl");
+      const node = rigRepo.getRig(result.result.rigId)!.nodes[0]!;
+      expect(node.cwd).toBe(worktree);
+      expect(sandboxes.get(node.id)).toMatchObject({
+        state: "provisioned",
+        repoPath: repo,
+        worktreePath: worktree,
+        branch: "squad/test-rig/dev.impl",
+      });
+      expect(calls(tmux.createSession)[0]![1]).toBe(worktree);
+      expect(calls(adapter.project)[0]![0].cwd).toBe(worktree);
+      expect(calls(adapter.launchHarness)[0]![0].cwd).toBe(worktree);
+      db.close();
+    });
+
+    it("gives a worktree only to the members that ask for one", async () => {
+      const { db, rigRepo, sandboxes, inst } = boot();
+
+      const result = await inst.instantiate(
+        specWith(member("impl", "worktree"), member("qa", "shared"), member("docs")),
+        root,
+        { cwdOverride: repo },
+      );
+
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) return;
+      const nodes = rigRepo.getRig(result.result.rigId)!.nodes;
+      const byId = (id: string) => nodes.find((n) => n.logicalId === id)!;
+      expect(byId("dev.impl").cwd).toContain("squad-worktrees");
+      expect(byId("dev.qa").cwd).toBe(repo);
+      expect(byId("dev.docs").cwd).toBe(repo);
+      expect(sandboxes.list().map((s) => s.seat)).toEqual(["dev.impl"]);
+      db.close();
+    });
+
+    it("fails the member, without starting a session, when the directory is not a git repository", async () => {
+      const plain = nodePath.join(tmp, "plain");
+      fs.mkdirSync(plain);
+      const { db, inst, tmux } = boot();
+
+      const result = await inst.instantiate(specWith(member("impl", "worktree")), root, { cwdOverride: plain });
+
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).toContain("needs a git repository");
+      expect(tmux.createSession).not.toHaveBeenCalled();
+      db.close();
+    });
+
+    it("refuses the member, rather than leaving it shared, when the daemon has no sandbox service", async () => {
+      const { db, inst, tmux } = boot(false);
+
+      const result = await inst.instantiate(specWith(member("impl", "worktree")), root, { cwdOverride: repo });
+
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).toContain("needs the seat sandbox service");
+      expect(tmux.createSession).not.toHaveBeenCalled();
+      db.close();
+    });
+
+    it("createMemberNode, the add_member and expand path, records the request too", () => {
+      const { db, rigRepo, podRepo, sandboxes, inst } = boot();
+      const rig = rigRepo.createRig("test-rig");
+      const pod = podRepo.createPod(rig.id, "dev", "Dev");
+
+      const { node } = db.transaction(() =>
+        inst.createMemberNode({
+          rigId: rig.id,
+          qualifiedId: "dev.impl",
+          member: makeRigSpec({ pods: [{ id: "dev", label: "Dev", members: [member("impl", "worktree")], edges: [] }] }).pods[0]!.members[0]!,
+          podId: pod.id,
+          rigRoot: root,
+          cwdOverride: repo,
+        }),
+      )();
+
+      expect(sandboxes.get(node.id)).toMatchObject({ state: "requested", seat: "dev.impl", rigName: "test-rig", repoPath: repo });
+      db.close();
+    });
   });
 
   it("refuses to start a harness when managed skill projection fails", async () => {
