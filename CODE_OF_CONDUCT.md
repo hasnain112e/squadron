@@ -48,7 +48,7 @@ pull requests) and when an individual is officially representing the project in 
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behaviour may be reported to the
-maintainers at **conduct@openrig.dev**. All complaints will be reviewed and investigated
+maintainers via the contact details on the GitHub profile of the project owner, [@hasnain112e](https://github.com/hasnain112e). All complaints will be reviewed and investigated
 promptly and fairly.
 All maintainers are obligated to respect the privacy and security of the reporter of any incident.
 
