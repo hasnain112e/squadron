@@ -26,6 +26,7 @@
     "url": "https://esoteric.run"
   },
   "bin": {
+    "squad": "dist/bin-wrapper.js",
     "rig": "dist/bin-wrapper.js",
     "openrig-tui": "tui/dist/main.js"
   },

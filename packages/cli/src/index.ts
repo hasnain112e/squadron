@@ -166,7 +166,7 @@ export function createProgram(depsOverride?: ProgramDeps): Command {
   const program = new Command();
 
   program
-    .name("rig")
+    .name("squad")
     .description("CLI for the OpenRig local control plane")
     .version(CLI_VERSION);
 
