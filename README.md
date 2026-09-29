@@ -186,6 +186,75 @@ files before first use. Daemon/bootstrap writes are automatic and do not each
 have an interactive preview; `rig setup --dry-run` does not preview every later
 startup effect.
 
+## Upgrading an existing instance
+
+These notes are inherited from OpenRig. They describe upgrading an OpenRig instance whose state lives under `OPENRIG_HOME`, which Squadron reads as well. Where they say `npm install -g @openrig/cli`, that installs the upstream OpenRig package. To run Squadron, install from source as in the [Quickstart](#quickstart).
+
+For an existing installation, follow the [upgrade procedure](skills/_canonical/core/openrig-upgrade/SKILL.md) and the [0.5.14 release notes](docs/releases/v0.5.14.md). Preserve live seats during the upgrade; `rig down` is not an upgrade step. Upgrading to 0.6.0 also requires Node.js 22 or 24: see [Moving off Node 20](#moving-off-node-20) and the [0.6.0 release notes](docs/releases/v0.6.0.md).
+
+### Moving off Node 20
+
+OpenRig 0.6.0 supports Node.js 22 and 24 only. Its SQLite binding
+(better-sqlite3 13) requires Node 22 or newer. Node 20 is no longer supported;
+the install check refuses it with an explanation.
+
+If you run OpenRig on Node 20, switch Node first, then reinstall the CLI under
+the new Node (a version manager keeps a separate global package set for each
+Node):
+
+```bash
+nvm install 22          # or 24; fnm or your package manager work the same way
+npm install -g @openrig/cli
+rig --version
+```
+
+Your existing OpenRig data stays where it is. The daemon reopens the same
+database under the new binding and applies any pending migrations in place.
+Restart the daemon under the new Node by following the upgrade procedure above.
+
+### Crossing the 0.5.9 layout boundary
+
+The migration below still applies when upgrading from a pre-0.5.9 instance.
+
+0.5.9 makes `$OPENRIG_HOME/context` the addressable context library, writes
+Claude telemetry to `state/context-usage` (and provider telemetry to
+`state/provider-usage`), and installs the default System World at
+`context/system/system-world.yaml`. Existing instances cross this boundary by
+an **Agent-Operated Migration** from the shipped `openrig-upgrade` skill. The
+target runtime reads canonical-first with legacy-fallback while new writes use
+the canonical roots; a custom context-library root stays stable during
+activation. This is not a directory rename to do while an old collector writes.
+
+```bash
+# SKILL_DIR is the installed openrig-upgrade skill directory.
+node "$SKILL_DIR/scripts/migrate-telemetry-state-0.5.9.mjs" --help
+node "$SKILL_DIR/scripts/migrate-telemetry-state-0.5.9.mjs" --home "$OPENRIG_HOME"
+node "$SKILL_DIR/scripts/migrate-telemetry-state-0.5.9.mjs" --home "$OPENRIG_HOME" --apply-state --preimage /safe/path/layout-0.5.9-before
+
+# Activate the exact target runtime separately. After every bounded legacy tail is followed by newer paired samples at both new state roots:
+node "$SKILL_DIR/scripts/migrate-telemetry-state-0.5.9.mjs" --home "$OPENRIG_HOME" --verify --preimage /safe/path/layout-0.5.9-before > /safe/path/layout-0.5.9-verify.json
+
+# Run the separately invoked non-destructive finalizer only with that exact receipt:
+node "$SKILL_DIR/scripts/migrate-telemetry-state-0.5.9.mjs" --home "$OPENRIG_HOME" --apply-library --preimage /safe/path/layout-0.5.9-before --verification /safe/path/layout-0.5.9-verify.json
+
+# Restore only helper-owned preparation/finalizer effects if the observed upgrade must be reversed:
+node "$SKILL_DIR/scripts/migrate-telemetry-state-0.5.9.mjs" --home "$OPENRIG_HOME" --rollback /safe/path/layout-0.5.9-before
+```
+
+`--help` prints the phase grammar without inventorying the instance. No phase
+flag intentionally runs the read-only plan; unknown options fail nonzero before
+plan or mutation.
+
+Every phase emits JSON. Stop on any issue or incomplete receipt and follow its
+`next` action; do not continue from copied legacy telemetry or retry a partial
+mutation blindly. Preparation leaves legacy state and collector settings in
+place. Verification accepts exact tail bytes only when that same seat has newer
+paired context and provider samples under `state/`; finalization revalidates the
+accepted tails, copies the library without overwrite, and switches config last.
+The helper never removes the legacy telemetry or library. Retirement follows
+separate stable runtime, writer, reader, and recovery proof. Daemon, database,
+seat, plugin, and release lifecycle actions remain agent-owned.
+
 ## Community and security
 
 - **Bugs and feature requests:** [open an issue](https://github.com/hasnain112e/squadron/issues/new/choose).
