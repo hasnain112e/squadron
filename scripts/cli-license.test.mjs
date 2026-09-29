@@ -10,8 +10,9 @@ test("the CLI build carries the unchanged repository LICENSE into npm pack", () 
   try {
     const cli = join(root, "packages/cli");
     const bin = join(root, "bin");
-    for (const dir of [cli, bin, join(cli, "src/schemas"), join(cli, "src/lib/scope-templates")]) mkdirSync(dir, { recursive: true });
+    for (const dir of [cli, bin, join(root, "scripts"), join(cli, "src/schemas"), join(cli, "src/lib/scope-templates")]) mkdirSync(dir, { recursive: true });
     copyFileSync("LICENSE", join(root, "LICENSE"));
+    copyFileSync("scripts/cli-post-build.mjs", join(root, "scripts/cli-post-build.mjs"));
     copyFileSync("packages/cli/package.json", join(cli, "package.json"));
     writeFileSync(join(cli, "src/schemas/fixture.json"), "{}\n");
     writeFileSync(join(cli, "src/lib/scope-templates/fixture.md"), "fixture\n");

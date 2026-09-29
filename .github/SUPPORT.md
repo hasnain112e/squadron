@@ -1,17 +1,14 @@
-# Getting help with OpenRig
+# Getting help with Squadron
 
-- **Docs:** https://openrig.dev/docs — getting started, CLI reference, configuration,
-  troubleshooting. An index linking to agent-friendly documentation is at
-  https://openrig.dev/llms.txt.
-- **Agents helping a user:** read [docs/reference/help.md](../docs/reference/help.md), or run `rig context get help`.
-- **Questions:** [Discussions › Q&A](https://github.com/mvschwarz/openrig/discussions/categories/q-a).
-- **Bugs:** [open an issue](https://github.com/mvschwarz/openrig/issues/new/choose) with the bug
-  template. Include `rig --version`, your OS and Node versions, and relevant redacted command output.
+- **Docs:** the [guided first-use path](../docs/reference/getting-started.md) and the rest of
+  [docs/reference](../docs/reference/). They were written for OpenRig's `rig` command; every command
+  works the same with `squad`.
+- **Agents helping a user:** read [docs/reference/help.md](../docs/reference/help.md), or run
+  `squad context get help`.
+- **Bugs and ideas:** [open an issue](https://github.com/hasnain112e/squadron/issues/new/choose).
+  Include `squad --version`, your OS and Node versions, and relevant redacted command output.
   Reports are public: remove credentials, private prompts and personal information.
-- **Ideas and setups:** [Ideas](https://github.com/mvschwarz/openrig/discussions/categories/ideas)
-  and [Show and tell](https://github.com/mvschwarz/openrig/discussions/categories/show-and-tell).
-- **Videos:** https://www.youtube.com/@openrig
 - **Security:** see [SECURITY.md](../SECURITY.md); please report privately.
 
-We aim to acknowledge issues and pull requests within one day. A substantive PR review decision
-within seven days is a target, not a guaranteed deadline. Details in [CONTRIBUTING.md](../CONTRIBUTING.md).
+Squadron is a small pre-release project and makes no response-time commitment yet. Details in
+[CONTRIBUTING.md](../CONTRIBUTING.md).

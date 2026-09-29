@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Squadron swarm visualizer</title>
+<style>
+  :root {
+    --ink: #071022;
+    --deck: #0d1a33;
+    --well: #08132a;
+    --hairline: #24406b;
+    --text: #e8f0ff;
+    --dim: #93a9cf;
+    --backend: #3dd9f5;
+    --frontend: #f573d9;
+    --qa: #ffc45c;
+    --pass: #72f2a9;
+    --fail: #ff7a86;
+    --ui: "Bahnschrift", "Segoe UI Variable Display", "Avenir Next Condensed", "Roboto Condensed", system-ui, sans-serif;
+    --code: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ink); }
+  body {
+    margin: 0;
+    color: var(--text);
+    font: 15px/1.5 var(--ui);
+    background:
+      radial-gradient(900px 420px at 12% -8%, rgba(61, 217, 245, .10), transparent 60%),
+      radial-gradient(800px 420px at 96% 0%, rgba(245, 115, 217, .07), transparent 60%),
+      var(--ink);
+    min-height: 100vh;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(147, 169, 207, .05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(147, 169, 207, .05) 1px, transparent 1px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(ellipse at 50% 25%, #000 25%, transparent 75%);
+            mask-image: radial-gradient(ellipse at 50% 25%, #000 25%, transparent 75%);
+  }
+  .wrap { position: relative; max-width: 1180px; margin: 0 auto; padding: 0 20px 28px; }
+
+  /* header */
+  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 16px 0 14px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: .01em; }
+  .cmd { margin: 0; padding: 6px 12px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--deck); font: .84rem/1.4 var(--code); color: var(--text); }
+  .cmd b { color: var(--backend); font-weight: 600; }
+  .ctl { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .sim { padding: 3px 10px; border: 1px solid var(--qa); border-radius: 999px; color: var(--qa); font-size: .8rem; }
+  button {
+    font: inherit; font-size: .85rem; color: var(--text); background: var(--deck);
+    border: 1px solid var(--hairline); border-radius: 8px; padding: 6px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--backend); outline-offset: 2px; }
+
+  /* panels */
+  .panel { background: var(--deck); border: 1px solid var(--hairline); border-radius: 14px; }
+  .rails { padding: 4px 12px; overflow-x: auto; }
+  .rails svg { display: block; width: 100%; min-width: 700px; height: auto; }
+
+  /* svg */
+  .rail { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+  .rail.base { stroke: var(--hairline); }
+  .rail.lit, .rail.pulse { stroke: var(--lane); }
+  .rail.lit { filter: drop-shadow(0 0 4px var(--lane)); transition: stroke-dasharray .25s linear; }
+  .rail.pulse { stroke-width: 4; stroke-dasharray: .1 1.2; stroke-dashoffset: .1; opacity: 0; }
+  .rail.pulse.go { opacity: 1; animation: travel 1.5s cubic-bezier(.45, 0, .2, 1) forwards; }
+  @keyframes travel { from { stroke-dashoffset: .1; } to { stroke-dashoffset: -1.05; } }
+  .rail.lit-int { stroke: var(--pass); filter: drop-shadow(0 0 5px var(--pass)); stroke-dasharray: 0 1; transition: stroke-dasharray 1s ease-out; }
+  .rail.lit-int.on { stroke-dasharray: 1 1; }
+  .backend { --lane: var(--backend); }
+  .frontend { --lane: var(--frontend); }
+  .qa { --lane: var(--qa); }
+  .node { fill: var(--lane); stroke: var(--deck); stroke-width: 2; opacity: 0; transform: scale(.2); transform-box: fill-box; transform-origin: center; transition: opacity .3s, transform .35s cubic-bezier(.3, 1.5, .5, 1); }
+  .node.on { opacity: 1; transform: scale(1); }
+  .lbl { font-family: var(--ui); font-size: 13px; fill: var(--dim); }
+  .lbl.lane { fill: var(--lane); font-weight: 600; }
+  .gate { fill: var(--well); stroke: var(--dim); stroke-width: 2; transition: stroke .3s, fill .3s; }
+  .gate.run { stroke: var(--qa); }
+  .gate.fail { stroke: var(--fail); fill: rgba(255, 122, 134, .12); }
+  .gate.pass { stroke: var(--pass); fill: rgba(114, 242, 169, .16); }
+  .gate-status { font-family: var(--ui); font-size: 13px; fill: var(--dim); }
+  .gate-status.run { fill: var(--qa); }
+  .gate-status.fail { fill: var(--fail); }
+  .gate-status.pass { fill: var(--pass); }
+  .land { fill: var(--pass); stroke: var(--deck); stroke-width: 2; opacity: 0; transform: scale(.2); transform-box: fill-box; transform-origin: center; transition: opacity .3s, transform .4s cubic-bezier(.3, 1.5, .5, 1); }
+  .land.on { opacity: 1; transform: scale(1); }
+  .land.tip { fill: var(--well); stroke: var(--pass); stroke-width: 2.5; }
+
+  /* lanes */
+  .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+  .lane { border-top: 3px solid var(--lane); padding: 12px 12px 10px; min-width: 0; }
+  .lane header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .lane h2 { margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--lane); }
+  .chip { padding: 1px 10px; border: 1px solid var(--chip, var(--lane)); border-radius: 999px; color: var(--chip, var(--lane)); font-size: .8rem; white-space: nowrap; transition: color .2s, border-color .2s; }
+  .chip.fail { --chip: var(--fail); }
+  .chip.pass { --chip: var(--pass); }
+  .meta { margin: 4px 0 0; font: .72rem/1.4 var(--code); color: var(--dim); overflow-wrap: anywhere; }
+  .term { margin: 10px 0 0; height: 14.2rem; overflow: hidden; padding: 9px 10px; background: var(--well); border: 1px solid var(--hairline); border-radius: 8px; font: .73rem/1.55 var(--code); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+  .bar { margin-top: 9px; height: 4px; background: var(--hairline); border-radius: 2px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--lane); }
+  .c { color: var(--dim); }
+  .k { color: var(--lane); }
+  .s { color: var(--lane); color: color-mix(in srgb, var(--lane) 55%, #fff); }
+  .f { color: var(--lane); color: color-mix(in srgb, var(--lane) 30%, var(--text)); }
+  .add, .ok { color: var(--pass); }
+  .del, .no { color: var(--fail); }
+  .caret { display: inline-block; width: .55em; height: 1.05em; margin-left: 1px; vertical-align: text-bottom; background: var(--lane); animation: blink 1s steps(2, start) infinite; }
+  @keyframes blink { to { visibility: hidden; } }
+  .paused .caret, .paused .rail.pulse.go { animation-play-state: paused; }
+
+  /* log */
+  .log { margin-top: 12px; padding: 10px 16px; }
+  .log h2 { margin: 0 0 4px; font-size: .95rem; font-weight: 600; color: var(--dim); }
+  .log ol { list-style: none; margin: 0; padding: 0; min-height: 7.4rem; }
+  .log li { display: flex; gap: 12px; align-items: baseline; font-size: .9rem; padding: 1px 0; }
+  .log time { font: .78rem var(--code); color: var(--dim); min-width: 3.2em; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lane, var(--dim)); flex: none; align-self: center; }
+  .log li.fail span:last-child { color: var(--fail); }
+  .log li.pass span:last-child { color: var(--pass); }
+  footer { margin: 14px 2px 0; color: var(--dim); font-size: .85rem; max-width: 70ch; }
+
+  @media (max-width: 900px) { .lanes { grid-template-columns: 1fr; } .ctl { margin-left: 0; } .term { height: 12rem; } }
+  @media (prefers-reduced-motion: reduce) {
+    .caret { animation: none; }
+    .rail.pulse { display: none; }
+    .node, .land, .rail.lit, .rail.lit-int { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+        <path d="M3 6 C12 6 13 15 21 15" stroke="#3dd9f5"/><path d="M3 15 H21" stroke="#f573d9"/><path d="M3 24 C12 24 13 15 21 15" stroke="#ffc45c"/><path d="M21 15 H28" stroke="#72f2a9"/>
+      </svg>
+      <h1>Squadron</h1>
+    </div>
+    <p class="cmd"><b>squad</b> swarm "Build Auth API"</p>
+    <div class="ctl">
+      <span class="sim" title="Scripted playback. The agents, code and test results shown here are not live output.">Simulation</span>
+      <button id="toggle" type="button">Pause</button>
+      <button id="restart" type="button">Restart</button>
+      <button id="speed" type="button" aria-label="Playback speed">1x</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel rails" aria-label="Branch graph">
+      <svg id="rails" viewBox="0 0 1000 226" role="img" aria-label="Three worktree branches, backend, frontend and qa, run in parallel, pass through a test gate and land on an integration branch"></svg>
+    </section>
+
+    <section class="lanes" aria-label="Agent sandboxes">
+      <article class="panel lane backend" id="lane-backend">
+        <header><h2>Backend</h2><span class="chip" data-chip>provisioning</span></header>
+        <p class="meta">squad/build-auth-api/backend</p>
+        <p class="meta">../squad-worktrees/build-auth-api/backend</p>
+        <pre class="term" data-term></pre>
+        <div class="bar"><i data-bar></i></div>
+      </article>
+      <article class="panel lane frontend" id="lane-frontend">
+        <header><h2>Frontend</h2><span class="chip" data-chip>provisioning</span></header>
+        <p class="meta">squad/build-auth-api/frontend</p>
+        <p class="meta">../squad-worktrees/build-auth-api/frontend</p>
+        <pre class="term" data-term></pre>
+        <div class="bar"><i data-bar></i></div>
+      </article>
+      <article class="panel lane qa" id="lane-qa">
+        <header><h2>QA</h2><span class="chip" data-chip>provisioning</span></header>
+        <p class="meta">squad/build-auth-api/qa</p>
+        <p class="meta">../squad-worktrees/build-auth-api/qa</p>
+        <pre class="term" data-term></pre>
+        <div class="bar"><i data-bar></i></div>
+      </article>
+    </section>
+
+    <section class="panel log" aria-label="Event log">
+      <h2>Events</h2>
+      <ol id="log" role="log" aria-live="polite"></ol>
+    </section>
+  </main>
+
+  <footer>
+    Concept simulation of the target workflow: one isolated worktree per agent, a test gate, then landing on an integration branch.
+    Worktree isolation and the gate are in progress and are not part of the current release.
+  </footer>
+  <noscript><p>This visualizer needs JavaScript.</p></noscript>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Script tokens: [class, text]. Everything on screen is derived from the simulation clock t.
+  var BACKEND = [
+    ["c", "// src/auth/auth.service.ts\n"],
+    ["k", "import"], ["", " { sign } "], ["k", "from"], ["s", ' "./jwt"'], ["", ";\n"],
+    ["k", "import"], ["", " { verify } "], ["k", "from"], ["s", ' "./password"'], ["", ";\n\n"],
+    ["k", "const"], ["", " TTL = "], ["s", '"1h"'], ["", ";\n\n"],
+    ["k", "export async function"], ["f", " login"], ["", "(email, pw) {\n"],
+    ["", "  const user = await users.byEmail(email);\n"],
+    ["k", "  if"], ["", " (!user) "], ["k", "throw new"], ["", " AuthError();\n"],
+    ["k", "  await"], ["", " verify(pw, user.hash);\n"],
+    ["k", "  return"], ["", " { token: sign(user.id, TTL) };\n}\n\n"],
+    ["c", "// src/auth/routes.ts\n"],
+    ["", "router.post("], ["s", '"/auth/login"'], ["", ", handleLogin);\n"]
+  ];
+  var PATCH = [
+    ["c", "\n// fix from qa: token lifetime\n"],
+    ["del", '- const TTL = "1h";\n'],
+    ["add", '+ const TTL = "15m";\n']
+  ];
+  var FRONTEND = [
+    ["c", "// src/components/LoginForm.tsx\n"],
+    ["k", "export function"], ["f", " LoginForm"], ["", "() {\n"],
+    ["", "  const [email, setEmail] = useState("], ["s", '""'], ["", ");\n"],
+    ["", "  const [pw, setPw] = useState("], ["s", '""'], ["", ");\n\n"],
+    ["k", "  async function"], ["f", " onSubmit"], ["", "(e) {\n"],
+    ["", "    e.preventDefault();\n"],
+    ["k", "    const"], ["", " { token } = "], ["k", "await"], ["", " api.post(\n      "], ["s", '"/auth/login"'], ["", ", { email, pw });\n"],
+    ["", "    session.set(token);\n  }\n\n"],
+    ["k", "  return"], ["", " <Form onSubmit={onSubmit} />;\n}\n"]
+  ];
+  var QA_TESTS = [
+    ["c", "// tests/auth.spec.ts\n"],
+    ["f", "describe"], ["", "("], ["s", '"auth"'], ["", ", () => {\n"],
+    ["", "  it("], ["s", '"logs in"'], ["", ", ...);\n"],
+    ["", "  it("], ["s", '"rejects a wrong password"'], ["", ", ...);\n"],
+    ["", "  it("], ["s", '"expires after 15 minutes"'], ["", ", ...);\n"],
+    ["", "});\n"]
+  ];
+
+  function size(tokens) { var n = 0; tokens.forEach(function (t) { n += t[1].length; }); return n; }
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function typed(tokens, n) {
+    var out = "", left = n;
+    for (var i = 0; i < tokens.length && left > 0; i++) {
+      var part = tokens[i][1].length <= left ? tokens[i][1] : tokens[i][1].slice(0, left);
+      out += tokens[i][0] ? '<span class="' + tokens[i][0] + '">' + esc(part) + "</span>" : esc(part);
+      left -= part.length;
+    }
+    return out;
+  }
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+  // Timeline (simulation seconds), derived from how long each lane takes to type.
+  var lanes = [
+    { id: "backend", start: 1.4, cps: 34, script: BACKEND, commits: [[0.45, "add login service"], [1, "add /auth/login route"]] },
+    { id: "frontend", start: 1.6, cps: 34, script: FRONTEND, commits: [[0.4, "login form state"], [1, "wire submit to session"]] },
+    { id: "qa", start: 2.2, cps: 26, script: QA_TESTS, commits: [[1, "add auth spec"]] }
+  ];
+  var PATCH_CPS = 24, PATCH_N = size(PATCH);
+  lanes.forEach(function (L) { L.n = size(L.script); L.dur = L.n / L.cps; L.end = L.start + L.dur; });
+  var CODE_END = Math.max.apply(null, lanes.map(function (L) { return L.end; }));
+  var T_TEST1 = CODE_END + 0.9;
+  var T_FAIL = T_TEST1 + 3.0;
+  var T_PATCH = T_FAIL + 0.8;
+  var T_PATCH_DONE = T_PATCH + PATCH_N / PATCH_CPS;
+  var T_FIX = T_PATCH_DONE + 0.5;
+  var T_TEST2 = T_FIX + 0.6;
+  var T_PASS = T_TEST2 + 2.4;
+  var T_MERGE = T_PASS + 0.7;
+  var T_LANDED = T_MERGE + 1.6;
+  var END = T_LANDED + 1.2;
+  var LOOP_AT = END + 3.5;
+
+  var RUN1 = [
+    [0, "dim", "\n$ npm test\n"], [0.9, "ok", " ✓ logs in\n"], [1.6, "ok", " ✓ rejects a wrong password\n"],
+    [2.3, "no", " ✗ expires after 15 minutes\n"], [2.6, "dim", "   expected 900, received 3600\n"], [3.0, "no", " 1 failing, 2 passing\n"]
+  ];
+  var RUN2 = [
+    [0, "dim", "\n$ npm test\n"], [0.7, "ok", " ✓ logs in\n"], [1.2, "ok", " ✓ rejects a wrong password\n"],
+    [1.7, "ok", " ✓ expires after 15 minutes\n"], [2.4, "ok", " 3 passing\n"]
+  ];
+  function runHtml(run, t0, t) {
+    var out = "";
+    run.forEach(function (l) {
+      if (t >= t0 + l[0]) out += '<span class="' + (l[1] === "dim" ? "c" : l[1]) + '">' + esc(l[2]) + "</span>";
+    });
+    return out;
+  }
+
+  var Y = { backend: 42, frontend: 113, qa: 184 };
+  var MID = 113;
+  var events = [
+    [0.6, "", "3 worktrees created for build-auth-api", ""]
+  ];
+  lanes.forEach(function (L) {
+    L.commits = L.commits.map(function (c) {
+      var at = L.start + c[0] * L.dur;
+      events.push([at, L.id, "commit: " + c[1], ""]);
+      return { at: at, msg: c[1] };
+    });
+  });
+  events.push([T_TEST1, "qa", "running tests", ""]);
+  events.push([T_FAIL, "qa", "1 failing: expires after 15 minutes. Gate blocked", "fail"]);
+  events.push([T_FIX, "backend", "commit: fix token lifetime", ""]);
+  events.push([T_TEST2, "qa", "running tests again", ""]);
+  events.push([T_PASS, "", "Gate passed: 3 of 3 tests", "pass"]);
+  events.push([T_LANDED, "", "Landed on integration: backend, frontend, qa", "pass"]);
+  events.sort(function (a, b) { return a[0] - b[0]; });
+  lanes[0].commits.push({ at: T_FIX, msg: "fix token lifetime" });
+  // The rails are a time axis: the lit head is "now", commits sit at their timestamps.
+  function xAt(t) { return 120 + clamp(t / T_FIX, 0, 1) * 555; }
+  lanes.forEach(function (L) { L.commits.forEach(function (c) { c.x = xAt(c.at); }); });
+
+  // Build the rail graph.
+  var NS = "http://www.w3.org/2000/svg";
+  var svg = document.getElementById("rails");
+  function el(name, attrs, parent) {
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    (parent || svg).appendChild(n);
+    return n;
+  }
+  function railPath(y) { return "M120 " + MID + " C160 " + MID + " 160 " + y + " 200 " + y + " H700 C730 " + y + " 730 " + MID + " 760 " + MID; }
+  el("path", { d: "M30 " + MID + " H120", "class": "rail base" });
+  el("text", { x: 30, y: MID - 17, "class": "lbl" }).textContent = "main";
+  el("circle", { cx: 120, cy: MID, r: 5, fill: "#93a9cf" });
+  el("path", { d: "M760 " + MID + " H940", "class": "rail base" });
+  var intLit = el("path", { d: "M760 " + MID + " H940", "class": "rail lit-int", pathLength: 1 });
+  el("text", { x: 940, y: MID - 20, "class": "lbl", "text-anchor": "end" }).textContent = "integration";
+  var gate = el("polygon", { points: "760," + (MID - 20) + " 780," + MID + " 760," + (MID + 20) + " 740," + MID, "class": "gate" });
+  el("text", { x: 796, y: MID + 34, "class": "lbl" }).textContent = "test gate";
+  var gateStatus = el("text", { x: 796, y: MID + 52, "class": "gate-status" });
+  lanes.forEach(function (L) {
+    var g = el("g", { "class": L.id });
+    L.basePath = el("path", { d: railPath(Y[L.id]), "class": "rail base" }, g);
+    L.total = L.basePath.getTotalLength();
+    L.lit = el("path", { d: railPath(Y[L.id]), "class": "rail lit", pathLength: 1 }, g);
+    L.lit.style.strokeDasharray = "0 1";
+    L.pulse = el("path", { d: railPath(Y[L.id]), "class": "rail pulse", pathLength: 1 }, g);
+    el("text", { x: 205, y: Y[L.id] - 12, "class": "lbl lane" }, g).textContent = L.id;
+    L.nodes = L.commits.map(function (c) {
+      var node = el("circle", { cx: c.x, cy: Y[L.id], r: 6, "class": "node" }, g);
+      el("title", {}, node).textContent = c.msg;
+      return node;
+    });
+    L.pane = document.getElementById("lane-" + L.id);
+    L.term = L.pane.querySelector("[data-term]");
+    L.chip = L.pane.querySelector("[data-chip]");
+    L.bar = L.pane.querySelector("[data-bar]");
+    L.cache = "";
+  });
+  var land = [[830, "backend"], [880, "frontend"], [930, "qa"]].map(function (p) {
+    var node = el("circle", { cx: p[0], cy: MID, r: 6, "class": "land " + p[1] });
+    node.style.fill = "var(--" + p[1] + ")";
+    return node;
+  });
+  var tip = el("circle", { cx: 940, cy: MID, r: 8, "class": "land tip" });
+
+  var logEl = document.getElementById("log");
+  var logShown = -1;
+
+  function fraction(L, x) {
+    var lo = 0, hi = L.total;
+    for (var i = 0; i < 14; i++) { var mid = (lo + hi) / 2; if (L.basePath.getPointAtLength(mid).x < x) lo = mid; else hi = mid; }
+    return lo / L.total;
+  }
+
+  function mmss(t) { var s = Math.floor(t); return "0" + Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60); }
+
+  function laneState(L, t) {
+    if (t < 1.2) return ["provisioning", ""];
+    if (t >= T_MERGE) return ["merged", "pass"];
+    if (t < L.end) return [L.id === "qa" ? "writing tests" : "coding", ""];
+    if (L.id === "backend" && t >= T_PATCH && t < T_FIX) return ["patching", ""];
+    if (L.id === "qa") {
+      if (t >= T_PASS) return ["passing", "pass"];
+      if (t >= T_TEST2) return ["testing", ""];
+      if (t >= T_FAIL) return ["1 failing", "fail"];
+      if (t >= T_TEST1) return ["testing", ""];
+    }
+    return ["waiting", ""];
+  }
+
+  function render(t) {
+    lanes.forEach(function (L) {
+      var n = clamp(Math.floor((t - L.start) * L.cps), 0, L.n);
+      var typing = t >= L.start && n < L.n;
+      var html = typed(L.script, n);
+      if (L.id === "backend" && t >= T_PATCH) {
+        var pn = clamp(Math.floor((t - T_PATCH) * PATCH_CPS), 0, PATCH_N);
+        html += typed(PATCH, pn);
+        typing = typing || pn < PATCH_N;
+      }
+      if (L.id === "qa") {
+        if (t >= T_TEST1) html += runHtml(RUN1, T_TEST1, t);
+        if (t >= T_TEST2) html += runHtml(RUN2, T_TEST2, t);
+      }
+      if (typing) html += '<span class="caret"></span>';
+      if (html !== L.cache) { L.term.innerHTML = html; L.term.scrollTop = L.term.scrollHeight; L.cache = html; }
+
+      var s = laneState(L, t);
+      if (L.chip.textContent !== s[0]) L.chip.textContent = s[0];
+      L.chip.className = "chip" + (s[1] ? " " + s[1] : "");
+      var coding = clamp((t - L.start) / L.dur, 0, 1);
+      L.bar.style.width = (t >= T_MERGE ? 100 : coding * 100) + "%";
+      L.lit.style.strokeDasharray = (t >= T_MERGE ? 1 : fraction(L, xAt(t))) + " 1";
+      L.pulse.classList.toggle("go", t >= T_MERGE);
+      L.commits.forEach(function (c, i) { L.nodes[i].classList.toggle("on", t >= c.at); });
+    });
+
+    var g = "", gs = "waiting";
+    if ((t >= T_TEST1 && t < T_FAIL) || (t >= T_TEST2 && t < T_PASS)) { g = "run"; gs = "running tests"; }
+    else if (t >= T_FAIL && t < T_TEST2) { g = "fail"; gs = "blocked, 1 failing"; }
+    else if (t >= T_PASS) { g = "pass"; gs = "passed"; }
+    gate.setAttribute("class", "gate" + (g ? " " + g : ""));
+    gateStatus.setAttribute("class", "gate-status" + (g ? " " + g : ""));
+    if (gateStatus.textContent !== gs) gateStatus.textContent = gs;
+
+    intLit.classList.toggle("on", t >= T_MERGE + 0.9);
+    land.forEach(function (node, i) { node.classList.toggle("on", t >= T_MERGE + 0.9 + i * 0.35); });
+    tip.classList.toggle("on", t >= T_LANDED);
+
+    var count = 0;
+    while (count < events.length && events[count][0] <= t) count++;
+    if (count !== logShown) {
+      logShown = count;
+      var rows = events.slice(Math.max(0, count - 5), count).map(function (e) {
+        return '<li class="' + (e[3] || "") + " " + e[1] + '"><time>' + mmss(e[0]) + '</time><i class="dot"></i><span>' + esc(e[2]) + "</span></li>";
+      });
+      logEl.innerHTML = rows.join("");
+    }
+  }
+
+  // Playback controls. Add ?t=<seconds>&paused=1 to the address to freeze a moment (handy for screenshots).
+  var t = 0, playing = true, speed = 1, last = 0;
+  var query = new URLSearchParams(window.location.search);
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var toggle = document.getElementById("toggle");
+  var wrap = document.querySelector(".wrap");
+  function setPlaying(on) { playing = on; toggle.textContent = on ? "Pause" : "Play"; wrap.classList.toggle("paused", !on); }
+  toggle.addEventListener("click", function () { if (!playing && t >= END) t = 0; setPlaying(!playing); });
+  document.getElementById("restart").addEventListener("click", function () { t = 0; setPlaying(true); });
+  var speedBtn = document.getElementById("speed");
+  speedBtn.addEventListener("click", function () { speed = speed === 1 ? 2 : 1; speedBtn.textContent = speed + "x"; });
+
+  function frame(now) {
+    var dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (playing) {
+      t += dt * speed;
+      if (t >= LOOP_AT) t = 0;
+    }
+    render(t);
+    requestAnimationFrame(frame);
+  }
+
+  if (query.has("t")) t = clamp(parseFloat(query.get("t")) || 0, 0, LOOP_AT);
+  if (reduce) { t = END; setPlaying(false); }
+  if (query.get("paused") === "1") setPlaying(false);
+  render(t);
+  requestAnimationFrame(function (now) { last = now; frame(now); });
+})();
+</script>
+</body>
+</html>

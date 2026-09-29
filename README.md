@@ -1,84 +1,112 @@
-# OpenRig
+# Squadron 🚀
 
-[![npm version](https://img.shields.io/npm/v/@openrig/cli)](https://www.npmjs.com/package/@openrig/cli) [![npm downloads](https://img.shields.io/npm/dw/@openrig/cli)](https://www.npmjs.com/package/@openrig/cli) [![License: Apache 2.0](https://img.shields.io/github/license/mvschwarz/openrig)](LICENSE) [![GitHub stars](https://img.shields.io/github/stars/mvschwarz/openrig?style=social)](https://github.com/mvschwarz/openrig/stargazers)
+**Autonomous AI agent swarm orchestrator.** Led by Hasnain Abbas ([@hasnain112e](https://github.com/hasnain112e)) and built on the [OpenRig](https://github.com/mvschwarz/openrig) runtime by mvschwarz and contributors.
 
-A harness wraps a model. A rig wraps your harnesses. Define your agent team in YAML, boot it with one command. Claude Code and Codex in the same rig, managed as one system.
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Node.js 22 | 24](https://img.shields.io/badge/node-22%20%7C%2024-339933) ![Platforms: Linux, macOS, Windows (CLI)](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20(CLI)-lightgrey)
 
-OpenRig turns AI coding agents from a pile of terminal sessions into a persistent, organized team. Talk to a lead agent about the outcome you want; it can coordinate specialists across teams and bring you results and decisions that need your attention. Start with a repository and one useful change, then keep the team's work and context at the same addresses.
+> Squadron is a pre-release fork in active development. The table below separates what works today from what is planned.
 
-**Guide:** [Getting started](docs/reference/getting-started.md) · **Stuck?** [Help](docs/reference/help.md) · **Questions:** [Q&A](https://github.com/mvschwarz/openrig/discussions/92) · **Updates and demos:** [@_feralmachine on X](https://x.com/_feralmachine)
+## Why Squadron?
 
-## See it running
+Running coding agents one at a time is slow. Running several in one working tree is worse: they overwrite each other's files and configuration (OpenRig [issue #64](https://github.com/mvschwarz/openrig/issues/64) is a real case).
 
-![The OpenRig TUI: the build rig as a graph, then as a table of seats with runtime, model, context and state, then one seat in detail (real recording, 10 seconds)](assets/readme/openrig-agents-working.gif)
+Squadron's goal is to run parallel agent squads in isolated Git worktrees, check every lane with tests, and land the result on an integration branch.
 
-**Start here:** [the guided first-use path](docs/reference/getting-started.md): install, launch a two-agent team in your repository, and get one reviewed change.
+| Capability | Status |
+| --- | --- |
+| `squad` command, with `rig` kept as an alias | Available |
+| CLI builds and installs natively on Windows | Available |
+| Multi-agent rigs, queues, workflows, snapshot and restore (inherited from OpenRig, needs tmux) | Available |
+| `squad swarm <prompt>` | Preview: prints a backend, frontend and QA plan; launches nothing |
+| One Git worktree per agent | In progress |
+| Test gate before landing | Planned |
+| Per-seat credential profiles | Planned |
+| Running agents on Windows through psmux | Experimental upstream work, not merged |
 
-Not setting this up today? Get the next walkthrough and occasional OpenRig updates → https://openrig.dev/follow
+## How it fits together
 
-## Install and first run
-
-Requires Node.js 22 or 24 and tmux, on macOS or Linux. On a Mac with Apple silicon, use Node.js 22 ([compatibility history](docs/releases/v0.5.15.md#known-compatibility-limitation)). Native Windows is not supported yet, and WSL2 has not been tested. Launching a rig writes provider hooks and workspace trust settings. Before running the commands below, read [what OpenRig changes on your machine](#what-openrig-changes-on-your-machine) and back up the relevant files.
-
-```bash
-npm install -g @openrig/cli
-rig setup --dry-run
+```mermaid
+flowchart LR
+  subgraph one["One agent, one working tree"]
+    direction LR
+    p1[Prompt] --> a1[Agent] --> w1[(Working tree)]
+  end
+  subgraph squad["Squadron target design"]
+    direction LR
+    p2[Prompt] --> plan[Swarm plan]
+    plan --> be[Backend seat, own worktree]
+    plan --> fe[Frontend seat, own worktree]
+    plan --> qa[QA seat, own worktree]
+    be --> gate{Test gate}
+    fe --> gate
+    qa --> gate
+    gate -->|pass| integ[(Integration branch)]
+  end
 ```
 
-To install with Bun instead, run `bun add -g @openrig/cli`. OpenRig still runs on Node.js, so install Node.js 22 as well. Bun may block this package's postinstall script, in which case the Node.js and SQLite check described under [what OpenRig changes on your machine](#what-openrig-changes-on-your-machine) does not run at install time.
+This is the target design. Today the plan step is a preview, and worktree isolation and the gate are in progress.
 
-Choose the working account you already have: **Claude Code, Codex, or both**. Reuse an explicit choice; no second subscription is required. `rig setup --dry-run` previews the broader setup, but applying `rig setup` checks both harnesses and cmux. It is optional for the [selected-provider path](docs/reference/getting-started.md#choose-your-providers).
+## Quickstart
 
-Before launching, your agent asks once: **“Allow your agents to run OpenRig commands without repeated permission prompts?” Yes — recommended / No — keep prompts.** This covers every `rig` command, including starting/stopping agents and configuration, at personal project scope unless you explicitly choose user-wide sessions. It is not global YOLO or permission to invent work. On Yes, the agent [adds and verifies native rules](docs/reference/getting-started.md#have-your-agent-configure-permissions); No or no answer leaves settings unchanged. An existing explicit choice is reused. Say “Undo the OpenRig command allowances added by this setup” to remove only its additions.
-
-Check `tmux -V` and only your selected CLI/login: `claude --version` plus
-`claude auth status`, or `codex --version` plus `codex login status`. If needed,
-sign in once with `claude auth login` or `codex login`; do not install or log in
-to an unused provider.
-
-| Team | Starter | Models |
-| --- | --- | --- |
-| Two Codex agents | `first-project` | Both `gpt-6-astra` (unchanged) |
-| Two Claude agents | `first-project-claude` | Configured native Claude default |
-| Claude owner + Codex checker | `first-project-mixed` | Claude default + `gpt-6-astra` |
-
-All three use the same owner/checker roles and task. Show the selected runtime,
-configured model and command before launch; confirm the account supports the
-model instead of silently falling back. The kernel starts automatically and
-selects from available authenticated providers independently of these two project
-agents. A missing unused provider is not a setup requirement.
+Requires Node.js 22 or 24 and git. Running agents also needs tmux and a logged-in Claude Code or Codex, on macOS or Linux.
 
 ```bash
-cd /path/to/your/repository
-starter=first-project  # or first-project-claude or first-project-mixed
-rig specs preview "$starter" --kind rig
-rig up "$starter" --cwd . --plan
-rig up "$starter" --cwd .
-rig tui --shared
+git clone https://github.com/hasnain112e/squadron.git
+cd squadron
+npm ci
+npm run build -w packages/daemon
+npm run build -w packages/cli
+npm install -g ./packages/cli
 ```
 
-The kernel provides separate operational support and the shared dashboard. To detach without stopping the dashboard, press Ctrl-b then d; `rig tui --shared` returns to that view. Plain `rig tui` opens an independent view. Closing a viewing terminal does not mean you should relaunch the team.
+This puts `squad` on your PATH, along with the `rig` alias that the bundled skills and hooks call by name. npm 11 may warn that the package's postinstall check is not allowed by `allowScripts`. The install still completes.
 
-Check project-seat readiness with `rig ps --nodes --rig "$starter"` and resolve any authentication, trust or permission prompt before assigning work. Then give the owner one bounded outcome from your repository:
+Preview a squad plan:
 
 ```bash
-rig send "dev-owner@$starter" 'Implement <one useful change>. Track the task in the queue and return its ID. Keep it local, verify the behavior, ask dev-check in this rig to check the exact candidate, and record the result and how I can try it.'
-rig queue list --destination "dev-owner@$starter" --limit 1000
+squad swarm "Build Auth API"
 ```
 
-Sending a message does not itself create a queue item; the owner records the task. Read the final artifact and the review of its exact candidate, then return to the same owner for the next change. [The guided first-use path](docs/reference/getting-started.md) covers readiness, a useful task, a reviewed result, Herdr/cmux terminals and recovery.
+```text
+Swarm plan: Build Auth API
+Mission:    build-auth-api
+  backend  squad/build-auth-api/backend
+           Build the server side of: Build Auth API
+  frontend squad/build-auth-api/frontend
+           Build the client side of: Build Auth API
+  qa       squad/build-auth-api/qa
+           Write and run tests for: Build Auth API, after backend and frontend land
 
-Not setting this up today? Get the next walkthrough and occasional OpenRig updates → https://openrig.dev/follow
+Preview only. The lanes are a fixed backend / frontend / qa template, not an agent's split of your prompt.
+Worktree sandboxes, agent launch and the test gate are not implemented in this version.
+```
 
-## Community
+To run a real team of agents today, use the workflow inherited from OpenRig (macOS or Linux, with tmux):
 
-- **Questions:** [Discussions › Q&A](https://github.com/mvschwarz/openrig/discussions/categories/q-a)
-- **Bugs and feature requests:** [open an issue](https://github.com/mvschwarz/openrig/issues/new/choose)
-- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [Getting help](.github/SUPPORT.md)
-- **Videos:** [youtube.com/@openrig](https://www.youtube.com/@openrig)
-- **Releases:** [GitHub Releases](https://github.com/mvschwarz/openrig/releases) and npm `@openrig/cli`
+```bash
+squad up first-project --cwd .
+squad ps --nodes --rig first-project
+squad launch --help   # launch or relaunch a node in a running rig
+```
 
-We aim to acknowledge issues and pull requests within one day; see [CONTRIBUTING.md](CONTRIBUTING.md#what-to-expect-from-us) for review targets.
+The [guided first-use path](docs/reference/getting-started.md) walks through it. It is written for `rig`; every command works the same with `squad`. Read [what Squadron changes on your machine](#what-openrig-changes-on-your-machine) before you launch a rig.
+
+## Concept demo
+
+[assets/swarm-visualizer.html](assets/swarm-visualizer.html) is a scripted animation of the target workflow: three agents in separate worktrees, a test gate that blocks and then passes, and a landing on an integration branch. It is a simulation, not live output.
+
+```bash
+node scripts/demo-simulation.mjs            # copies it to your Downloads folder
+node scripts/demo-simulation.mjs --out .    # or to a folder you choose
+```
+
+Open `squadron-visualizer.html` in a browser. Add `?t=20&paused=1` to its address to freeze a moment.
+
+## Built on OpenRig
+
+Squadron is a fork of [OpenRig](https://github.com/mvschwarz/openrig) v0.6.1, licensed under Apache 2.0. The daemon, runtime adapters, terminal UI, queues, workflows and the tmux control layer come from OpenRig, and this repository keeps its full history and authorship. What Squadron adds so far is the `squad` command and `rig` alias, a native Windows build of the CLI, and the `squad swarm` preview. Worktree isolation, the test gate and credential profiles are the next milestones.
+
+[NOTICE](NOTICE) records the attribution. Squadron is not affiliated with or endorsed by the OpenRig project. For the inherited features in depth, see the [OpenRig README](https://github.com/mvschwarz/openrig#readme).
 
 ## What OpenRig changes on your machine
 
@@ -158,111 +186,9 @@ files before first use. Daemon/bootstrap writes are automatic and do not each
 have an interactive preview; `rig setup --dry-run` does not preview every later
 startup effect.
 
-## What It Does
-
-OpenRig is a multi-agent harness — it manages the system that coding agents form when you run them together. Not the agents themselves, but the team they create: which sessions are running, how they relate, how to recover after a reboot, and how to stop it from becoming terminal sprawl.
-
-- **Define** topologies in YAML (RigSpec) with pods, edges, and continuity policies
-- **Boot** everything with `rig up` — tmux sessions, harnesses, startup files, readiness checks
-- **See** rigs, pods, and seats in the TUI topology table and graph; inspect projects, specs, feeds, and instance health
-- **Discover** existing Claude Code and Codex sessions in tmux and adopt them into a managed rig
-- **Snapshot** the topology with `rig down --snapshot`, restore by name with `rig up <name>`
-- **Communicate** across agents with `rig send`, `rig broadcast`, and `rig chatroom`
-- **Protect** a seat where you type by hand: `rig seat set-typing-guard <seat> --enabled true --reason <text>` holds automatic messages and wakes instead of typing them into that seat (off by default; see `rig seat set-typing-guard --help`)
-- **Connect** Slack through an app you create in your own workspace; the experimental `rig slack manifest` prints that app's manifest ([setup guide](docs/reference/slack-app-setup.md))
-- **Evolve** running topologies with `rig grow`, `rig shrink`, `rig launch`, `rig remove`
-
-Every agent runs in a tmux session you can attach to, inspect, and work with directly.
-
-## Starter Rigs
-
-Use `first-project`, `first-project-claude`, or `first-project-mixed` for the
-same focused first-use path on your selected providers. `product-team` is an optional
-larger product-development example:
-
-```bash
-rig specs preview product-team --kind rig
-rig up product-team
-```
-
-Use it when you want a larger product squad: two orchestrators, implementation, QA, design, and two independent reviewers.
-
-For a smaller starter, use `conveyor`:
-
-```bash
-rig specs preview conveyor --kind rig
-rig up conveyor
-```
-
-`conveyor` is a four-seat starter mixing Claude Code and Codex. It shows a handoff path through intake, planning, build, and review; `first-project` remains the smaller two-seat starting point.
-
-Also ships: `implementation-pair`, `adversarial-review`, `research-team`, and `secrets-manager` (HashiCorp Vault managed by a specialist agent).
-
-Browse the library:
-
-```bash
-rig specs ls
-```
-
-## How It Works
-
-OpenRig is a local daemon + CLI + terminal UI + MCP server, built on tmux. The older React web UI remains in maintenance mode with best-effort support.
-
-```
-CLI / TUI / MCP
-      |
-Hono HTTP daemon
-      |
-  Domain services
-      |
-  SQLite + tmux + runtime adapters
-```
-
-- **CLI**: Commands for both humans and agents to launch teams, inspect state, send messages, track owned work, and manage context.
-- **TUI**: Topology explorer, table and graph views, seat details, Specs, Projects, Terminals, Feed, and System. Navigate with the keyboard, mouse, or command bar.
-- **MCP**: Tools so agents can manage their own topology (`rig_up`, `rig_ps`, `rig_send`, `rig_chatroom_send`, etc.)
-- **Runtimes**: Native Claude Code and Codex sessions, terminal nodes, and a Pi adapter using an RPC runner inside a terminal pane.
-
-## Terminal UI and Workspaces
-
-The TUI shows the team's coordination state; herdr and cmux show the actual agent terminals alongside it. Use `rig tui commands` to list the TUI's command-bar navigation, or [try the interactive TUI tour](https://openrig.dev/tour/workspace).
-
-![OpenRig TUI topology graph showing seven agent seats grouped into product, development, and QA pods](assets/ui/screenshots/tui-topology.png)
-
-*Captured from the interactive TUI demo using fictional project data.*
-
-With herdr installed and connected, open the starter's terminals together:
-
-```bash
-rig terminal open first-project --provider herdr
-```
-
-For cmux, use `--provider cmux`. In the TUI, a rig's detail view has a `term ▸ rig <name>` link that opens every running seat of that rig in the default terminal provider; with herdr that is up to 16 seats per tab, in a workspace named after the rig. The underlying sessions remain accessible through tmux. See the [terminal workspace guide](docs/reference/getting-started.md#share-the-dashboard-and-return-to-it) for setup and returning to an existing view.
-
-## Key Concepts
-
-- **RigSpec**: Declarative multi-agent harness definition in YAML. Pods, members, edges, continuity policies, culture file.
-- **AgentSpec**: Reusable agent blueprint with skills, guidance, hooks, profiles, and startup contracts.
-- **Seat**: A stable role and address in a rig, such as `dev-owner@first-project`. The conversation occupying it can change while its identity and authored context remain.
-- **Pod**: A group of related seats with shared guidance and context. Each agent still has its own context window.
-- **Discovery**: `rig discover` fingerprints existing tmux sessions. `rig adopt` brings them under management.
-- **Snapshot/Restore**: `rig down --snapshot` captures full state. `rig up <name>` restores from latest snapshot. Restore reports per-node outcomes (resumed, fresh, or failed).
-- **RigBundle**: Portable archive with vendored AgentSpecs and SHA-256 integrity. Share topologies across machines.
-- **Culture**: CULTURE.md sets coordination norms for the group. Research rigs get exploratory culture. Implementation rigs get conservative, trust-but-verify culture.
-
-## Agent-Managed Software
-
-A rig can package actual software alongside the agents that manage it. The shipped example is `secrets-manager`: a HashiCorp Vault instance operated by a specialist agent.
-
-```bash
-rig up secrets-manager
-rig env status secrets-manager
-rig send vault-specialist@secrets-manager "Check Vault health and report status." --verify
-```
-
-Requires Docker for service-backed rigs.
-
 ## Upgrading an existing instance
+
+These notes are inherited from OpenRig. They describe upgrading an OpenRig instance whose state lives under `OPENRIG_HOME`, which Squadron reads as well. Where they say `npm install -g @openrig/cli`, that installs the upstream OpenRig package. To run Squadron, install from source as in the [Quickstart](#quickstart).
 
 For an existing installation, follow the [upgrade procedure](skills/_canonical/core/openrig-upgrade/SKILL.md) and the [0.5.14 release notes](docs/releases/v0.5.14.md). Preserve live seats during the upgrade; `rig down` is not an upgrade step. Upgrading to 0.6.0 also requires Node.js 22 or 24: see [Moving off Node 20](#moving-off-node-20) and the [0.6.0 release notes](docs/releases/v0.6.0.md).
 
@@ -329,52 +255,11 @@ The helper never removes the legacy telemetry or library. Retirement follows
 separate stable runtime, writer, reader, and recovery proof. Daemon, database,
 seat, plugin, and release lifecycle actions remain agent-owned.
 
-## Requirements
+## Community and security
 
-- Node.js 22 or 24 (the supported versions in this release). Node 20 is no
-  longer supported. Node 26 and other versions are untested. On a Mac with Apple
-  silicon, use Node.js 22: see the [compatibility history](docs/releases/v0.5.15.md#known-compatibility-limitation).
-- tmux
-- macOS or Linux. Native Windows is not supported yet, and WSL2 has not been tested
-
-Optional:
-- herdr or cmux for terminal workspaces showing the agents together
-- Docker for service-backed rigs and managed apps
-
-## Setup and Troubleshooting
-
-- `rig setup` attempts core machine preparation: tmux, cmux, Claude Code, Codex, and tmux defaults. It reports what it tried and what actually succeeded. If something fails, it gives the local agent enough context to finish the job.
-- `rig setup --full` attempts a broader operator workstation setup (jq, gh) on top of core.
-- `rig doctor` inspects current system health and helps diagnose problems after setup. Use it when something stops working or after machine changes.
-
-Both commands support `--json` for agent-driven workflows.
-
-Before setup or managed launch, review [what OpenRig changes on your machine](#what-openrig-changes-on-your-machine), including provider trust, hooks and selected runtime resources.
-
-Already-running adopted sessions may need restart before they pick up newly written runtime config.
-
-**For agents:** First ask which available provider(s) the user wants, reusing an explicit choice. Recommend the working account they already have and follow the selected-provider guide above. Offer core setup (`rig setup`) or the fuller workstation path (`rig setup --full`) only when they want those additional tools. Inspect the result with `--json` and use `rig doctor` to finish any remaining machine-specific issues. When OpenRig itself misbehaves, read [docs/reference/help.md](docs/reference/help.md) (installed agents can run `rig context get help`; the same text is at [openrig.dev/help/agents](https://www.openrig.dev/help/agents)): it covers the next step, known problems, and how to reach the team if you're still stuck.
-
-## Comparison with Claude Managed Agents
-
-OpenRig is open source and self-hosted, with Claude Code and Codex in the same team. You operate it on your own infrastructure; the selected providers' model usage costs still apply.
-
-[Full comparison](https://openrig.dev/compare/claude-managed-agents)
-
-## Links
-
-- **Website**: [openrig.dev](https://openrig.dev)
-- **Docs**: [openrig.dev/docs](https://openrig.dev/docs) ([documentation index for agents](https://openrig.dev/llms.txt))
-- **Blog**: [openrig.dev/blog](https://openrig.dev/blog) · [Why I Built OpenRig](https://esoteric.run/blog/why-i-built-openrig)
-- **Open Specification**: [openrig.dev/specs](https://openrig.dev/specs)
-- **Videos**: [youtube.com/@openrig](https://www.youtube.com/@openrig)
-- **X**: [@_feralmachine](https://twitter.com/_feralmachine)
-- **Follow the project**: [openrig.dev/follow](https://openrig.dev/follow)
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=mvschwarz/openrig&type=Date)](https://star-history.com/#mvschwarz/openrig&Date)
+- **Bugs and feature requests:** [open an issue](https://github.com/hasnain112e/squadron/issues/new/choose).
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [Getting help](.github/SUPPORT.md)
 
 ## License
 
-Apache 2.0
+Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
