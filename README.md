@@ -18,7 +18,7 @@ Squadron's goal is to run parallel agent squads in isolated Git worktrees, check
 | CLI builds and installs natively on Windows | Available |
 | Multi-agent rigs, queues, workflows, snapshot and restore (inherited from OpenRig, needs tmux) | Available |
 | `squad swarm <prompt>` | Preview: prints a backend, frontend and QA plan; launches nothing |
-| One Git worktree per agent | In progress |
+| One Git worktree per agent | Available in rig specs: set `isolation: worktree` on a member. `squad swarm` does not use it yet |
 | Test gate before landing | Planned |
 | Per-seat credential profiles | Planned |
 | Running agents on Windows through psmux | Experimental upstream work, not merged |
@@ -44,7 +44,7 @@ flowchart LR
   end
 ```
 
-This is the target design. Today the plan step is a preview, and worktree isolation and the gate are in progress.
+This is the target design. Today the plan step is a preview and the test gate is not built. Worktree isolation works for rig spec members, but `squad swarm` does not launch them yet.
 
 ## Quickstart
 
@@ -78,7 +78,7 @@ Mission:    build-auth-api
            Write and run tests for: Build Auth API, after backend and frontend land
 
 Preview only. The lanes are a fixed backend / frontend / qa template, not an agent's split of your prompt.
-Worktree sandboxes, agent launch and the test gate are not implemented in this version.
+Agent launch and the test gate are not implemented in this version. To give a seat its own git worktree today, set `isolation: worktree` on a rig spec member.
 ```
 
 To run a real team of agents today, use the workflow inherited from OpenRig (macOS or Linux, with tmux):
@@ -88,6 +88,8 @@ squad up first-project --cwd .
 squad ps --nodes --rig first-project
 squad launch --help   # launch or relaunch a node in a running rig
 ```
+
+Seats that share a repository overwrite each other's files. Add `isolation: worktree` to a member in your rig spec and that seat gets its own git worktree and branch (`squad/<rig>/<member>`) when it launches. `squad sandbox ls` lists them, and nothing is deleted unless you run `squad sandbox rm`. See [worktree isolation](docs/reference/rig-spec.md#worktree-isolation).
 
 The [guided first-use path](docs/reference/getting-started.md) walks through it. It is written for `rig`; every command works the same with `squad`. Read [what Squadron changes on your machine](#what-openrig-changes-on-your-machine) before you launch a rig.
 
@@ -104,7 +106,7 @@ Open `squadron-visualizer.html` in a browser. Add `?t=20&paused=1` to its addres
 
 ## Built on OpenRig
 
-Squadron is a fork of [OpenRig](https://github.com/mvschwarz/openrig) v0.6.1, licensed under Apache 2.0. The daemon, runtime adapters, terminal UI, queues, workflows and the tmux control layer come from OpenRig, and this repository keeps its full history and authorship. What Squadron adds so far is the `squad` command and `rig` alias, a native Windows build of the CLI, and the `squad swarm` preview. Worktree isolation, the test gate and credential profiles are the next milestones.
+Squadron is a fork of [OpenRig](https://github.com/mvschwarz/openrig) v0.6.1, licensed under Apache 2.0. The daemon, runtime adapters, terminal UI, queues, workflows and the tmux control layer come from OpenRig, and this repository keeps its full history and authorship. What Squadron adds so far is the `squad` command and `rig` alias, a native Windows build of the CLI, the `squad swarm` preview, and per-seat git worktrees (`isolation: worktree`). The test gate and credential profiles are the next milestones.
 
 [NOTICE](NOTICE) records the attribution. Squadron is not affiliated with or endorsed by the OpenRig project. For the inherited features in depth, see the [OpenRig README](https://github.com/mvschwarz/openrig#readme).
 

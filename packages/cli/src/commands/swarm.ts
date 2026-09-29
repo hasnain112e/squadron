@@ -56,6 +56,6 @@ export function swarmCommand(): Command {
       }
       console.log("");
       console.log("Preview only. The lanes are a fixed backend / frontend / qa template, not an agent's split of your prompt.");
-      console.log("Worktree sandboxes, agent launch and the test gate are not implemented in this version.");
+      console.log("Agent launch and the test gate are not implemented in this version. To give a seat its own git worktree today, set `isolation: worktree` on a rig spec member.");
     });
 }

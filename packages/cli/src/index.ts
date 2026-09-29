@@ -30,6 +30,7 @@ import { hostCommand } from "./commands/host.js";
 import { gatewayCommand } from "./commands/gateway.js";
 import type { GatewayCommandDeps } from "./commands/gateway.js";
 import { parkedCommand } from "./commands/parked.js";
+import { sandboxCommand } from "./commands/sandbox.js";
 import { swarmCommand } from "./commands/swarm.js";
 import { mcpCommand } from "./commands/mcp.js";
 import { agentCommand, type AgentDeps } from "./commands/agent.js";
@@ -179,6 +180,7 @@ export function createProgram(depsOverride?: ProgramDeps): Command {
   program.addCommand(crashCartCommand());
   program.addCommand(gatewayCommand(depsOverride?.gatewayDeps));
   program.addCommand(parkedCommand());
+  program.addCommand(sandboxCommand());
   program.addCommand(swarmCommand());
   program.addCommand(exportCommand(depsOverride?.exportDeps));
   program.addCommand(importCommand(depsOverride?.importDeps));
