@@ -146,6 +146,33 @@ describe("RigSpec codec (pod-aware)", () => {
     expect(member.starterRef).toEqual({ name: "openrig-builder-base--claude-code" });
   });
 
+  it("isolation round-trips through serialize → parse → validate → normalize", () => {
+    const spec: RigSpec = {
+      ...VALID_RIG,
+      pods: [
+        {
+          id: "dev",
+          label: "Development",
+          members: [
+            { id: "impl", agentRef: "local:agents/impl", profile: "default", runtime: "claude-code", cwd: ".", isolation: "worktree" },
+            { id: "qa", agentRef: "local:agents/qa", profile: "default", runtime: "codex", cwd: "." },
+          ],
+          edges: [],
+        },
+      ],
+    };
+
+    const yaml = RigSpecCodec.serialize(spec);
+    expect(yaml).toContain("isolation: worktree");
+    expect(yaml.match(/isolation:/g)).toHaveLength(1);
+
+    const parsed = RigSpecCodec.parse(yaml);
+    expect(RigSpecSchema.validate(parsed).errors).toEqual([]);
+    const members = RigSpecSchema.normalize(parsed).pods[0]!.members;
+    expect(members[0]!.isolation).toBe("worktree");
+    expect(members[1]!.isolation).toBeUndefined();
+  });
+
   it("starter_ref + session_source.mode='rebuild' both survive roundtrip (composition allowed)", () => {
     const spec: RigSpec = {
       ...VALID_RIG,
