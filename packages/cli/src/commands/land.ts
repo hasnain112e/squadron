@@ -10,7 +10,7 @@ import { askDaemon, refused, timeoutSeconds } from "./sandbox-client.js";
 type RunStatus = "passed" | "failed" | "timed_out" | "error";
 
 export interface LandResultView {
-  outcome: "landed" | "nothing_to_land" | "conflict" | "gate_failed" | "setup_failed" | "not_ready";
+  outcome: "landed" | "nothing_to_land" | "conflict" | "gate_failed" | "setup_failed" | "not_ready" | "ready";
   rig: string;
   branch: string;
   worktreePath: string;
@@ -20,7 +20,7 @@ export interface LandResultView {
     seat: string;
     branch: string;
     tipSha: string | null;
-    result: "merged" | "already_landed" | "conflict" | "not_attempted" | "not_ready";
+    result: "merged" | "already_landed" | "conflict" | "not_attempted" | "not_ready" | "would_merge";
     detail?: string;
     files?: string[];
   }>;
@@ -40,7 +40,11 @@ const LANE_WORDS: Record<LandResultView["lanes"][number]["result"], string> = {
   conflict: "conflict",
   not_attempted: "not merged",
   not_ready: "not ready",
+  would_merge: "would merge",
 };
+
+/** The outcomes that leave nothing for the person to fix, so the command exits cleanly. */
+const SUCCESSFUL_OUTCOMES: LandResultView["outcome"][] = ["landed", "nothing_to_land", "ready"];
 
 const tail = (text: string, lines = 30): string => text.trimEnd().split(/\r?\n/).slice(-lines).join("\n");
 
@@ -73,6 +77,14 @@ export function formatLand(result: LandResultView): string {
     case "nothing_to_land":
       lines.push("Nothing new to land: every lane is already included.");
       break;
+    case "ready": {
+      const count = result.lanes.filter((lane) => lane.result === "would_merge").length;
+      lines.push(
+        `Ready. Landing would merge ${count} lane${count === 1 ? "" : "s"} onto ${result.branch}, then set up and gate the result. Nothing was changed. ` +
+          `A dry run cannot find merge conflicts: the first one stops the landing and leaves ${result.branch} as it was. Land for real with: squad land ${result.rig}`,
+      );
+      break;
+    }
     case "not_ready":
       lines.push(`Nothing was merged: some lanes are not ready, and ${result.branch} is unchanged.`);
       break;
@@ -105,15 +117,21 @@ export function formatReset(reset: { worktreeRemoved: boolean; branchDeleted: bo
 
 export function landCommand(): Command {
   return new Command("land")
-    .description("Land a rig's isolated seats on its integration branch, or throw that branch away with --reset")
+    .description("Land a rig's isolated seats on its integration branch, check first with --dry-run, or throw that branch away with --reset")
     .argument("<rig>", "Rig name")
+    .option("--dry-run", "Show which lanes would land and which are not ready, and change nothing")
     .option("--reset", "Throw the integration branch and its worktree away instead of landing")
     .option("--force", "With --reset: discard uncommitted changes in the integration worktree")
     .option("--timeout <seconds>", "Stop each setup or gate command after this many seconds (default 900)")
     .option("--json", "Output JSON")
-    .action(async (rig: string, opts: { reset?: boolean; force?: boolean; timeout?: string; json?: boolean }) => {
+    .action(async (rig: string, opts: { dryRun?: boolean; reset?: boolean; force?: boolean; timeout?: string; json?: boolean }) => {
       if (opts.force && !opts.reset) {
         console.error("--force only applies to --reset.");
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.dryRun && opts.reset) {
+        console.error("--dry-run cannot be combined with --reset.");
         process.exitCode = 1;
         return;
       }
@@ -138,13 +156,13 @@ export function landCommand(): Command {
       const res = await askDaemon((client) =>
         client.post<{ ok?: boolean; result?: LandResultView; error?: string }>(
           "/api/land",
-          { rig, ...(timeout === undefined ? {} : { timeoutSeconds: timeout }) },
+          { rig, ...(timeout === undefined ? {} : { timeoutSeconds: timeout }), ...(opts.dryRun ? { dryRun: true } : {}) },
           { timeoutMs: 2 * 60 * 60 * 1000 },
         ),
       );
       if (!res) return;
       if (!res.data.ok || !res.data.result) return refused(res.status, res.data);
       console.log(opts.json ? JSON.stringify(res.data.result, null, 2) : formatLand(res.data.result));
-      if (res.data.result.outcome !== "landed" && res.data.result.outcome !== "nothing_to_land") process.exitCode = 1;
+      if (!SUCCESSFUL_OUTCOMES.includes(res.data.result.outcome)) process.exitCode = 1;
     });
 }

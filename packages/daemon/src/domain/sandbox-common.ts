@@ -12,7 +12,8 @@ const GIT_TIMEOUT_MS = 120_000;
 /** How long a setup or gate command may run unless the caller says otherwise. */
 export const DEFAULT_COMMAND_TIMEOUT_MS = 15 * 60 * 1000;
 
-export type SandboxErrorCode = "not_found" | "in_use" | "failed";
+/** "invalid": the request itself is wrong (400). "not_found" (404). Anything else the caller can fix is a conflict (409). */
+export type SandboxErrorCode = "not_found" | "in_use" | "failed" | "invalid";
 
 /**
  * A rig's integration branch has a worktree like a seat does, and is recorded as one more sandbox under this id.

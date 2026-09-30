@@ -20,7 +20,6 @@ profiles:
       skills: []
       guidance: []
       subagents: []
-      hooks: []
       runtime_resources: []
 
 resources: {}
@@ -29,6 +28,8 @@ startup:
   files: []
   actions: []
 ```
+
+> `hooks` is no longer accepted under `uses` or `resources`: the validator rejects it ("removed in plugin-primitive (Phase 3a)") and asks for plugins instead. Later examples in this file still show it and predate that change.
 
 ## Practical Example (implementer agent)
 

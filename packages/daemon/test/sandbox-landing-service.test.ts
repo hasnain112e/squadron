@@ -8,6 +8,7 @@ import { RigRepository } from "../src/domain/rig-repository.js";
 import { SeatSandboxService } from "../src/domain/seat-sandbox-service.js";
 import { SeatGateService } from "../src/domain/seat-gate-service.js";
 import { SandboxLandingService } from "../src/domain/sandbox-landing-service.js";
+import { integrationNodeId } from "../src/domain/sandbox-common.js";
 import { createFullTestDb } from "./helpers/test-app.js";
 
 const IDENT = ["-c", "user.email=t@t", "-c", "user.name=t"];
@@ -229,6 +230,89 @@ describe("SandboxLandingService", { timeout: 120_000 }, () => {
       expect(second.tipSha).not.toBe(first.tipSha);
       expect(second.gates[0]).toMatchObject({ reused: false, run: { commitSha: second.tipSha } });
       expect(fs.existsSync(path.join(integrationDir(), "a2.txt"))).toBe(true);
+    });
+  });
+
+  describe("dry run", () => {
+    it("says which lanes would merge, and creates nothing: no branch, no worktree, no record, no gate run", async () => {
+      const a = await seat("dev.a");
+      const b = await seat("dev.b");
+      commitFile(a.worktree, "a.txt");
+      commitFile(b.worktree, "b.txt");
+      await gates.run(a.nodeId);
+      await gates.run(b.nodeId);
+      const runsBefore = runCount();
+      const recordsBefore = sandboxes.list().length;
+
+      const result = await landing.land("demo", { dryRun: true });
+
+      expect(result).toMatchObject({ outcome: "ready", branch: integrationBranch, worktreePath: integrationDir(), gates: [], setup: null });
+      expect(resultsOf(result)).toEqual({ "dev.a": "would_merge", "dev.b": "would_merge" });
+      expect(git(repo, "branch", "--list", integrationBranch)).toBe("");
+      expect(fs.existsSync(integrationDir())).toBe(false);
+      expect(sandboxes.get(integrationNodeId("demo"))).toBeNull();
+      expect(sandboxes.list()).toHaveLength(recordsBefore);
+      expect(runCount()).toBe(runsBefore);
+    });
+
+    it("judges the lanes exactly as a real land does, so it names what is not ready", async () => {
+      const a = await seat("dev.a");
+      const b = await seat("dev.b");
+      commitFile(a.worktree, "a.txt");
+      commitFile(b.worktree, "b.txt");
+      await gates.run(a.nodeId); // dev.b has no gate result
+
+      const dry = await landing.land("demo", { dryRun: true });
+      const real = await landing.land("demo");
+
+      expect(dry.outcome).toBe("not_ready");
+      expect(dry.lanes).toEqual(real.lanes);
+      expect(dry.lanes[1]!.detail).toContain(`squad gate run ${b.nodeId}`);
+    });
+
+    it("changes nothing, so the real land afterwards merges the same commits", async () => {
+      const a = await seat("dev.a");
+      const b = await seat("dev.b");
+      commitFile(a.worktree, "a.txt");
+      commitFile(b.worktree, "b.txt");
+      await gates.run(a.nodeId);
+      await gates.run(b.nodeId);
+
+      const dry = await landing.land("demo", { dryRun: true });
+      const real = await landing.land("demo");
+
+      expect(dry.outcome).toBe("ready");
+      expect(real.outcome).toBe("landed");
+      expect(resultsOf(real)).toEqual({ "dev.a": "merged", "dev.b": "merged" });
+      expect(dry.lanes.map((lane) => lane.tipSha)).toEqual(real.lanes.map((lane) => lane.tipSha));
+    });
+
+    it("has nothing to land once every lane is on the branch, and does not run the gate again", async () => {
+      const a = await seat("dev.a");
+      commitFile(a.worktree, "a.txt");
+      await gates.run(a.nodeId);
+      await landing.land("demo");
+      const runsBefore = runCount();
+      const tip = git(repo, "rev-parse", integrationBranch);
+
+      const dry = await landing.land("demo", { dryRun: true });
+
+      expect(dry.outcome).toBe("nothing_to_land");
+      expect(resultsOf(dry)).toEqual({ "dev.a": "already_landed" });
+      expect(runCount()).toBe(runsBefore);
+      expect(git(repo, "rev-parse", integrationBranch)).toBe(tip);
+    });
+
+    it("does not look for merge conflicts: it only judges readiness, and the real land still stops at the conflict", async () => {
+      const a = await seat("dev.a");
+      const b = await seat("dev.b");
+      commitFile(a.worktree, "shared.txt", "one\nFROM A\nthree\n");
+      commitFile(b.worktree, "shared.txt", "one\nFROM B\nthree\n");
+      await gates.run(a.nodeId);
+      await gates.run(b.nodeId);
+
+      expect((await landing.land("demo", { dryRun: true })).outcome).toBe("ready");
+      expect((await landing.land("demo")).outcome).toBe("conflict");
     });
   });
 

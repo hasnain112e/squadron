@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { commandLine, formatGateRun, gateCommand, type GateRunView } from "../src/commands/gate.js";
 import { startStubDaemon, useCommandRunner, type StubDaemon } from "./helpers/stub-daemon.js";
 
@@ -61,6 +61,42 @@ describe("gate run", () => {
     expect(daemon.requests).toEqual([{ method: "POST", url: "/api/sandboxes/01ABC/gate", body: undefined }]);
     expect(result.out).toBe("Gate passed for dev.impl at a1b2c3d (12.3s): npm test");
     expect(result.exitCode).toBeUndefined();
+  });
+
+  describe("inside a seat's session", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("runs its own gate with no argument, using the node id in the environment", async () => {
+      vi.stubEnv("OPENRIG_NODE_ID", "01SEAT");
+      daemon = await startStubDaemon(() => ({ body: { ok: true, run: run() } }));
+
+      const result = await runCommand(daemon.url, "gate", "run");
+
+      expect(daemon.requests[0]!.url).toBe("/api/sandboxes/01SEAT/gate");
+      expect(result.exitCode).toBeUndefined();
+    });
+
+    it("uses the node id it is given over the one in the environment", async () => {
+      vi.stubEnv("OPENRIG_NODE_ID", "01SEAT");
+      daemon = await startStubDaemon(() => ({ body: { ok: true, run: run() } }));
+
+      await runCommand(daemon.url, "gate", "run", "01OTHER");
+
+      expect(daemon.requests[0]!.url).toBe("/api/sandboxes/01OTHER/gate");
+    });
+
+    it("says what to give when there is no node id anywhere, without contacting the daemon", async () => {
+      vi.stubEnv("OPENRIG_NODE_ID", "");
+      vi.stubEnv("RIGGED_NODE_ID", "");
+      daemon = await startStubDaemon(() => ({ body: {} }));
+
+      const result = await runCommand(daemon.url, "gate", "run");
+
+      expect(result.err).toContain("Give the node id of a seat");
+      expect(result.err).toContain("OPENRIG_NODE_ID");
+      expect(daemon.requests).toEqual([]);
+      expect(result.exitCode).toBe(1);
+    });
   });
 
   it("sends the timeout, and exits non-zero with the output when the gate fails", async () => {
