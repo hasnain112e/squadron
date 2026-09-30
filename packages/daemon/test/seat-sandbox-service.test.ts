@@ -48,10 +48,10 @@ describe("SeatSandboxService", { timeout: 30_000 }, () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  function seat(repoPath = repo, rigName = "demo", logicalId = "dev.impl") {
+  function seat(repoPath = repo, rigName = "demo", logicalId = "dev.impl", commands: { setup?: string[]; gate?: string[] } = {}) {
     const rig = rigRepo.createRig(rigName);
     const node = rigRepo.addNode(rig.id, logicalId, { role: "worker", runtime: "claude-code" });
-    service.request({ nodeId: node.id, rigId: rig.id, seat: logicalId, repoPath });
+    service.request({ nodeId: node.id, rigId: rig.id, seat: logicalId, repoPath, ...commands });
     return node.id;
   }
 
@@ -176,6 +176,121 @@ describe("SeatSandboxService", { timeout: 30_000 }, () => {
     await expect(service.provision(nodeId)).rejects.toThrow(/already exists/);
     expect(fs.readFileSync(path.join(target, "precious.txt"), "utf8")).toBe("not ours");
     expect(service.get(nodeId)?.state).toBe("requested");
+  });
+
+  describe("setup", () => {
+    // Each run appends one character to a file in the directory it runs in, so the file records how often and where.
+    const counting = (extra = "") => [process.execPath, "-e", `${extra} require('fs').appendFileSync('setup-runs.txt', 'x')`];
+    const runsIn = (dir: string) => (fs.existsSync(path.join(dir, "setup-runs.txt")) ? fs.readFileSync(path.join(dir, "setup-runs.txt"), "utf8").length : 0);
+
+    it("stores the declared commands with the request", () => {
+      const withSetup = seat(repo, "demo", "dev.impl", { setup: ["npm", "ci"], gate: ["npm", "test"] });
+      const without = seat(repo, "other", "dev.qa");
+
+      expect(service.get(withSetup)).toMatchObject({ setup: ["npm", "ci"], gate: ["npm", "test"], setupState: "pending" });
+      expect(service.get(without)).toMatchObject({ setup: null, gate: null, setupState: "none" });
+    });
+
+    it("runs in the worktree root before the seat starts, even when the seat works in a subdirectory", async () => {
+      const nodeId = seat(path.join(repo, "pkg"), "demo", "dev.impl", { setup: counting() });
+
+      const cwd = await service.provision(nodeId);
+
+      const worktree = worktreeFor("demo", "dev.impl");
+      expect(cwd).toBe(path.join(worktree, "pkg"));
+      expect(runsIn(worktree)).toBe(1);
+      expect(runsIn(path.join(worktree, "pkg"))).toBe(0);
+      expect(service.get(nodeId)?.setupState).toBe("passed");
+    });
+
+    it("does not run again on later launches", async () => {
+      const nodeId = seat(repo, "demo", "dev.impl", { setup: counting() });
+
+      await service.provision(nodeId);
+      await service.provision(nodeId);
+
+      expect(runsIn(worktreeFor("demo", "dev.impl"))).toBe(1);
+    });
+
+    it("stops the launch when setup fails, keeps the worktree, and tries again on the next launch", async () => {
+      const failUntilFlag = [process.execPath, "-e", "if (!require('fs').existsSync('ok.flag')) { console.log('deps missing'); process.exit(4) }"];
+      const nodeId = seat(repo, "demo", "dev.impl", { setup: failUntilFlag });
+      const worktree = worktreeFor("demo", "dev.impl");
+
+      await expect(service.provision(nodeId)).rejects.toThrow(/Setup failed for dev\.impl \(exit code 4\)[\s\S]*deps missing[\s\S]*squad sandbox setup/);
+      expect(service.get(nodeId)).toMatchObject({ state: "provisioned", setupState: "failed" });
+      expect(service.get(nodeId)?.setupOutput).toContain("deps missing");
+      expect(fs.existsSync(path.join(worktree, ".git"))).toBe(true);
+
+      fs.writeFileSync(path.join(worktree, "ok.flag"), "");
+      await expect(service.provision(nodeId)).resolves.toBe(worktree);
+      expect(service.get(nodeId)?.setupState).toBe("passed");
+    });
+
+    it("runs again when the worktree had to be recreated", async () => {
+      const nodeId = seat(repo, "demo", "dev.impl", { setup: counting() });
+      const worktree = (await service.provision(nodeId))!;
+      fs.rmSync(worktree, { recursive: true, force: true });
+
+      await service.provision(nodeId);
+
+      expect(runsIn(worktree)).toBe(1); // the fresh checkout has only the run it just made
+      expect(service.get(nodeId)?.setupState).toBe("passed");
+    });
+
+    it("does not repeat a setup that already passed in a worktree adopted from an earlier generation of the rig", async () => {
+      const worktree = (await service.provision(seat(repo, "demo", "dev.impl", { setup: counting() })))!;
+
+      const second = seat(repo, "demo", "dev.impl", { setup: counting() });
+      await service.provision(second);
+
+      expect(runsIn(worktree)).toBe(1);
+      expect(service.get(second)?.setupState).toBe("passed");
+    });
+
+    it("does run a different setup in an adopted worktree", async () => {
+      const worktree = (await service.provision(seat(repo, "demo", "dev.impl", { setup: counting() })))!;
+
+      await service.provision(seat(repo, "demo", "dev.impl", { setup: counting("/* changed */") }));
+
+      expect(runsIn(worktree)).toBe(2);
+    });
+
+    it("can be run again on demand, and a failing command is a result rather than an error", async () => {
+      const nodeId = seat(repo, "demo", "dev.impl", { setup: counting() });
+      const worktree = (await service.provision(nodeId))!;
+
+      const again = await service.runSetup(nodeId);
+
+      expect(again).toMatchObject({ status: "passed", exitCode: 0 });
+      expect(runsIn(worktree)).toBe(2);
+
+      db.prepare("UPDATE node_sandboxes SET setup_json = ? WHERE node_id = ?").run(JSON.stringify([process.execPath, "-e", "console.log('boom'); process.exit(2)"]), nodeId);
+      const failed = await service.runSetup(nodeId);
+      expect(failed).toMatchObject({ status: "failed", exitCode: 2 });
+      expect(service.get(nodeId)).toMatchObject({ setupState: "failed" });
+      expect(service.get(nodeId)?.setupOutput).toContain("boom");
+    });
+
+    it("refuses to run when nothing is configured or the seat has no worktree yet", async () => {
+      const noSetup = seat(repo, "demo", "dev.impl");
+      await service.provision(noSetup);
+      await expect(service.runSetup(noSetup)).rejects.toThrow(/No setup command is configured for dev\.impl/);
+
+      const notLaunched = seat(repo, "other", "dev.qa", { setup: counting() });
+      await expect(service.runSetup(notLaunched)).rejects.toThrow(/no worktree yet/);
+      await expect(service.runSetup("no-such-node")).rejects.toMatchObject({ code: "not_found" });
+    });
+
+    it("refuses to run two setups for one seat at once", async () => {
+      const slow = [process.execPath, "-e", "setTimeout(() => {}, 1500)"];
+      const nodeId = seat(repo, "demo", "dev.impl", { setup: slow });
+      await service.provision(nodeId);
+
+      const first = service.runSetup(nodeId);
+      await expect(service.runSetup(nodeId)).rejects.toMatchObject({ code: "in_use" });
+      await expect(first).resolves.toMatchObject({ status: "passed" });
+    });
   });
 
   describe("remove", () => {

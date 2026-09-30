@@ -233,8 +233,8 @@ describe("PodRigInstantiator", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     });
 
-    const member = (id: string, isolation?: "worktree" | "shared") =>
-      ({ id, agentRef: "local:agents/impl", profile: "default", runtime: "claude-code", cwd: ".", ...(isolation ? { isolation } : {}) });
+    const member = (id: string, isolation?: "worktree" | "shared", commands: { setup?: string[]; gate?: string[] } = {}) =>
+      ({ id, agentRef: "local:agents/impl", profile: "default", runtime: "claude-code", cwd: ".", ...(isolation ? { isolation } : {}), ...commands });
     const specWith = (...members: ReturnType<typeof member>[]) =>
       RigSpecCodec.serialize(makeRigSpec({ pods: [{ id: "dev", label: "Dev", members, edges: [] }] }));
     const calls = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.calls;
@@ -290,6 +290,40 @@ describe("PodRigInstantiator", () => {
 
       expect(result.ok).toBe(false);
       expect(JSON.stringify(result)).toContain("needs a git repository");
+      expect(tmux.createSession).not.toHaveBeenCalled();
+      db.close();
+    });
+
+    it("runs the member's setup in the fresh worktree before its session starts, and keeps the gate for later", async () => {
+      const { db, sandboxes, rigRepo, inst, tmux } = boot();
+      const worktree = nodePath.join(tmp, "squad-worktrees", "repo", "test-rig", "dev.impl");
+      let setupHadRun: boolean | undefined;
+      vi.mocked(tmux.createSession).mockImplementationOnce(async () => {
+        setupHadRun = fs.existsSync(nodePath.join(worktree, "setup-ran.txt"));
+        return { ok: true as const };
+      });
+      const setup = [process.execPath, "-e", "require('fs').writeFileSync('setup-ran.txt', 'yes')"];
+      const gate = ["npm", "test"];
+
+      const result = await inst.instantiate(specWith(member("impl", "worktree", { setup, gate })), root, { cwdOverride: repo });
+
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) return;
+      expect(setupHadRun).toBe(true); // the seat's session found its dependencies already in place
+      const nodeId = rigRepo.getRig(result.result.rigId)!.nodes[0]!.id;
+      expect(sandboxes.get(nodeId)).toMatchObject({ setup, gate, setupState: "passed", state: "provisioned" });
+      db.close();
+    });
+
+    it("fails the member, without starting a session, when its setup fails", async () => {
+      const { db, inst, tmux } = boot();
+      const setup = [process.execPath, "-e", "console.log('registry unreachable'); process.exit(5)"];
+
+      const result = await inst.instantiate(specWith(member("impl", "worktree", { setup })), root, { cwdOverride: repo });
+
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).toContain("Setup failed for dev.impl (exit code 5)");
+      expect(JSON.stringify(result)).toContain("registry unreachable");
       expect(tmux.createSession).not.toHaveBeenCalled();
       db.close();
     });

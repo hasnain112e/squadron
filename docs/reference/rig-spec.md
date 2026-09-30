@@ -278,6 +278,8 @@ directory's `CLAUDE.md`, including blocks written by other rigs.
 | `model` | string | no | — | Model override. Runtime-specific (e.g., `claude-opus-4-6` for Claude Code). |
 | `restore_policy` | string | no | `resume_if_possible` | Restore behavior. One of: `resume_if_possible`, `relaunch_fresh`, `checkpoint_only`. |
 | `isolation` | string | no | `shared` | Where the seat's files live. `shared` runs in `cwd` itself. `worktree` gives the seat its own git worktree and branch at launch; see [Worktree isolation](#worktree-isolation). Not valid on terminal nodes. |
+| `setup` | string[] | no | — | A command, as a program and its arguments (never a shell string), run once in the root of the seat's fresh worktree before the seat starts. Needs `isolation: worktree`; see [Setup, gate and landing](#setup-gate-and-landing). |
+| `gate` | string[] | no | — | A command, in the same form, that decides whether the seat's work may land. Run in the seat's `cwd` inside its worktree. Needs `isolation: worktree`; see [Setup, gate and landing](#setup-gate-and-landing). |
 | `startup` | StartupBlock | no | — | Member-level startup files and actions. Applied only to this member. |
 
 ### Worktree isolation
@@ -298,10 +300,35 @@ members:
 - **Which directory the seat gets.** The same directory as `cwd`, inside the worktree. If `cwd` is `packages/api` in the repository, the seat starts in `packages/api` in its worktree.
 - **What changes.** The seat's recorded `cwd` becomes the worktree, so skill projection, restore, and resume all use it. `rig export` still writes the `cwd` you authored and `isolation: worktree`.
 - **Relaunching.** The worktree is reused on every launch. If its directory was deleted, it is recreated on the same branch, so committed work is kept. Starting a rig again under the same name reuses the worktree its seats had.
-- **What it does not copy.** A worktree is a fresh checkout of tracked files. Untracked and ignored files from your repository, such as `node_modules` or `.env`, are not copied, so a seat that needs them has to install or create them in its own worktree. The agent runtime may also ask you to trust the new directory the first time a seat starts in it.
+- **What it does not copy.** A worktree is a fresh checkout of tracked files. Untracked and ignored files from your repository, such as `node_modules` or `.env`, are not copied, so a seat that needs them has to install or create them in its own worktree; `setup` is the place to do that. The agent runtime may also ask you to trust the new directory the first time a seat starts in it.
 - **Failing early.** If `cwd` is not in a git repository, the repository has no commits, or the target directory already exists and is not this seat's worktree, that seat fails to launch with a message saying which, and no session is started.
 - **Nothing is deleted for you.** Tearing a rig down leaves its worktrees and branches in place. `rig sandbox ls` lists them, and `rig sandbox rm <node-id>` removes one. It refuses while the seat is running or the worktree has uncommitted changes unless you pass `--force`, and it deletes the branch only if git reports it fully merged.
 - **When it applies.** `isolation` is read when the seat is created. Adding it to a member of a running rig does not move that seat.
+
+### Setup, gate and landing
+
+Isolated seats work in parallel; these keys bring their results together safely. A command is a list holding a program and its arguments. It is run directly and not through a shell, so `["npm", "test"]` works and `"npm test && lint"` is not accepted.
+
+```yaml
+members:
+  - id: api
+    agent_ref: "local:agents/api"
+    profile: default
+    runtime: claude-code
+    cwd: .
+    isolation: worktree
+    setup: ["npm", "ci"]
+    gate: ["npm", "test"]
+```
+
+- **Setup** runs in the root of a seat's worktree when the worktree is new, before the seat starts. If it fails, the seat does not start and the error carries the end of the output; relaunching runs it again. `rig sandbox setup <node-id>` runs it on demand, for example after a lockfile changes. A worktree adopted from an earlier run of the same rig keeps a setup that already passed there.
+- **Gate.** `rig gate run <node-id>` runs the gate in the seat's `cwd` inside its worktree and records the result against the commit it tested. It refuses if the worktree has uncommitted changes to tracked files or is not on the seat's own branch, because a result has to belong to a commit, and it does not count a run during which the worktree changed. A gate that fails is a result, not an error, and the command exits non-zero unless the gate passed.
+- **Landing.** `rig land <rig>` merges the seats of a rig onto the branch `squad/<rig>/integration`, checked out in its own worktree beside the seats'. A seat is merged only if its gate passed at its current tip, and the exact commit that passed is the one merged, so work committed after the gate cannot slip in. If any seat is not ready, nothing is merged. Seats are merged in the order they were created, each with a merge commit. A seat that made no commits is already included and needs no gate.
+- **A conflict** stops the landing at that seat, aborts that merge, and leaves the branch exactly as it was before it; seats merged earlier stay merged. Resolve it on the seat: merge the integration branch into the seat's branch in its worktree, fix the conflict, commit, run its gate, and land again.
+- **The integration gate.** After the merges, the integration worktree runs each distinct `setup` (again after new merges, since they can change the lockfile) and then each distinct `gate`, in the directory its seat works in, and records the results. A gate that already passed at the integration branch's current commit is not run again. Landing again merges only what was committed and gated since.
+- **Nothing on your branches changes.** The result is a branch for you to review and merge. `rig land <rig> --reset` deletes the integration branch and its worktree, which is the rollback: the seats' branches are untouched, and the next land starts from your repository's current `HEAD`. It refuses if the integration worktree has uncommitted changes unless you pass `--force`.
+- **Trust.** `setup` and `gate` run on your machine with your permissions, like a Makefile, so read a spec that declares them as you would read one. They run with `CI=true` unless `CI` is already set, and for at most 15 minutes unless you pass `--timeout`. On Windows, a program that is a `.cmd` file, such as `npm`, accepts only simple arguments (letters, digits, spaces and `_ - . / \ : @ + = , ~ #`); anything else is refused, because `cmd.exe` would interpret it.
+- **Limits.** All the isolated seats of a rig must be in one repository to land together.
 
 ### Terminal Nodes
 
@@ -589,6 +616,7 @@ These rules are enforced by the validator. A spec that violates any of these wil
 25. Non-idempotent actions must not include `restore` in `applies_on`.
 26. `applies_on` values must be from: `fresh_start`, `restore`.
 27. `isolation` must be one of: `worktree`, `shared`. `worktree` is not valid on terminal nodes.
+28. `setup` and `gate` must each be a non-empty list of non-empty strings (a program and its arguments; at most 64 entries of at most 4096 characters, none containing a NUL), and need `isolation: worktree`.
 
 ---
 
