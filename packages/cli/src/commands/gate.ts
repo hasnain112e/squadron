@@ -1,9 +1,11 @@
 import { Command } from "commander";
+import { readOpenRigEnv } from "../openrig-compat.js";
 import { askDaemon, refused, requestTimeoutMs, timeoutSeconds } from "./sandbox-client.js";
 
 // `gate run` — run a seat's gate, the command its rig spec member declares to decide whether its work may
 // land. The daemon runs it in the seat's worktree and records the result against the commit it tested;
-// `squad land` reads those results. This command asks and reports.
+// `squad land` reads those results. This command asks and reports. Inside a seat's own session the node id
+// is already in the environment, so a seat runs it with no argument.
 
 export interface GateRunView {
   seat: string;
@@ -36,10 +38,16 @@ export function gateCommand(): Command {
   gate
     .command("run")
     .description("Run the seat's gate in its worktree and record the result against the commit it tested")
-    .argument("<node-id>", "Node id, from `sandbox ls`")
+    .argument("[node-id]", "Node id, from `sandbox ls` (default: $OPENRIG_NODE_ID, which is set inside a seat's session)")
     .option("--timeout <seconds>", "Stop the gate after this many seconds (default 900)")
     .option("--json", "Output the run as JSON")
-    .action(async (nodeId: string, opts: { timeout?: string; json?: boolean }) => {
+    .action(async (given: string | undefined, opts: { timeout?: string; json?: boolean }) => {
+      const nodeId = given ?? readOpenRigEnv("OPENRIG_NODE_ID", "RIGGED_NODE_ID")?.trim();
+      if (!nodeId) {
+        console.error("Give the node id of a seat (see: squad sandbox ls), or run this inside a seat's session, where OPENRIG_NODE_ID is set.");
+        process.exitCode = 1;
+        return;
+      }
       const timeout = timeoutSeconds(opts.timeout);
       if (timeout === null) return;
       const res = await askDaemon((client) =>

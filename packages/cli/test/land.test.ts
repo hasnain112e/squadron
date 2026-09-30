@@ -38,6 +38,32 @@ describe("formatLand", () => {
     expect(text).toContain("Nothing new to land");
   });
 
+  it("says a dry run is ready, which lanes would merge, that nothing changed, and that conflicts are not looked for", () => {
+    const lines = formatLand(
+      result({
+        outcome: "ready",
+        gates: [],
+        lanes: [
+          { nodeId: "01A", seat: "dev.a", branch: "squad/demo/dev.a", tipSha: "a1a1a1a1a1", result: "would_merge" },
+          { nodeId: "01B", seat: "dev.bb", branch: "squad/demo/dev.bb", tipSha: "b2b2b2b2b2", result: "would_merge" },
+          { nodeId: "01C", seat: "dev.c", branch: "squad/demo/dev.c", tipSha: "c3c3c3c3c3", result: "already_landed" },
+        ],
+      }),
+    ).split("\n");
+
+    expect(lines[1]).toBe("  dev.a   would merge     a1a1a1a");
+    expect(lines[2]).toBe("  dev.bb  would merge     b2b2b2b");
+    expect(lines[4]).toContain("Ready. Landing would merge 2 lanes onto squad/demo/integration, then set up and gate the result. Nothing was changed.");
+    expect(lines[4]).toContain("A dry run cannot find merge conflicts");
+    expect(lines[4]).toContain("Land for real with: squad land demo");
+  });
+
+  it("says lane, not lanes, for one", () => {
+    const text = formatLand(result({ outcome: "ready", gates: [], lanes: [{ nodeId: "01A", seat: "dev.a", branch: "squad/demo/dev.a", tipSha: "a1a1a1a1a1", result: "would_merge" }] }));
+
+    expect(text).toContain("would merge 1 lane onto");
+  });
+
   it("explains a lane that is not ready, and that nothing was merged", () => {
     const text = formatLand(
       result({
@@ -138,6 +164,40 @@ describe("land", () => {
 
     const run = await runCommand(daemon.url, "land", "demo");
 
+    expect(run.exitCode).toBe(1);
+  });
+
+  it("asks for a dry run with --dry-run, prints what would land, and exits cleanly when it is ready", async () => {
+    daemon = await startStubDaemon(() => ({
+      body: { ok: true, result: result({ outcome: "ready", gates: [], lanes: [{ nodeId: "01A", seat: "dev.a", branch: "squad/demo/dev.a", tipSha: "a1a1a1a1a1", result: "would_merge" }] }) },
+    }));
+
+    const run = await runCommand(daemon.url, "land", "demo", "--dry-run");
+
+    expect(daemon.requests).toEqual([{ method: "POST", url: "/api/land", body: { rig: "demo", dryRun: true } }]);
+    expect(run.out).toContain("would merge");
+    expect(run.out).toContain("Ready.");
+    expect(run.exitCode).toBeUndefined();
+  });
+
+  it("still exits non-zero when a dry run finds lanes that are not ready", async () => {
+    daemon = await startStubDaemon(() => ({
+      body: { ok: true, result: result({ outcome: "not_ready", gates: [], lanes: [{ nodeId: "01A", seat: "dev.a", branch: "squad/demo/dev.a", tipSha: "a1a1a1a1a1", result: "not_ready", detail: "no gate result" }] }) },
+    }));
+
+    const run = await runCommand(daemon.url, "land", "demo", "--dry-run");
+
+    expect(run.out).toContain("no gate result");
+    expect(run.exitCode).toBe(1);
+  });
+
+  it("refuses --dry-run with --reset, without contacting the daemon", async () => {
+    daemon = await startStubDaemon(() => ({ body: {} }));
+
+    const run = await runCommand(daemon.url, "land", "demo", "--dry-run", "--reset");
+
+    expect(run.err).toBe("--dry-run cannot be combined with --reset.");
+    expect(daemon.requests).toEqual([]);
     expect(run.exitCode).toBe(1);
   });
 
