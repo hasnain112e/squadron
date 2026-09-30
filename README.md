@@ -6,6 +6,10 @@
 
 > Squadron is a pre-release fork in active development. The table below separates what works today from what is planned.
 
+[![Scripted simulation: backend, frontend and QA agents work in separate Git worktrees, and a failing QA test blocks the test gate, so nothing lands yet.](assets/readme/squadron-gate-blocked.png)](assets/readme/squadron-swarm.mp4)
+
+**3 agents. 3 worktrees. 1 failing test. Nothing lands until it is fixed.** Click the image to play the 30 second clip. It is a scripted simulation of the workflow, not live output.
+
 ## Why Squadron?
 
 Running coding agents one at a time is slow. Running several in one working tree is worse: they overwrite each other's files and configuration (OpenRig [issue #64](https://github.com/mvschwarz/openrig/issues/64) is a real case).
@@ -132,7 +136,9 @@ The [guided first-use path](docs/reference/getting-started.md) walks through it.
 
 ## Concept demo
 
-[assets/swarm-visualizer.html](assets/swarm-visualizer.html) is a scripted animation of the target workflow: three agents in separate worktrees, a test gate that blocks and then passes, and a landing on an integration branch. It is a simulation, not live output.
+[assets/swarm-visualizer.html](assets/swarm-visualizer.html) is a scripted animation of the workflow: three agents in separate worktrees, a test gate that blocks and then passes, and a landing on an integration branch. It is a simulation, not live output. The [30 second clip](assets/readme/squadron-swarm.mp4) at the top of this page is a render of it, and this is how it ends:
+
+![Scripted simulation: the test gate has passed, and the backend, frontend and QA lanes have landed on the integration branch.](assets/readme/squadron-landed.png)
 
 ```bash
 node scripts/demo-simulation.mjs            # copies it to your Downloads folder
