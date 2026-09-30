@@ -39,6 +39,8 @@ export const SPEC_VALIDATION_CAPABILITIES: ReadonlySet<string> = new Set(["model
 const VALID_SYNC_TRIGGERS = new Set(["pre_compaction", "pre_shutdown", "manual", "milestone"]);
 const VALID_RESTORE_POLICIES = new Set(["resume_if_possible", "relaunch_fresh", "checkpoint_only"]);
 const VALID_ISOLATION_MODES = new Set(["worktree", "shared"]);
+const MAX_COMMAND_PARTS = 64;
+const MAX_COMMAND_PART_LENGTH = 4096;
 const VALID_IMPORT_PREFIXES = ["local:", "path:"];
 const VALID_SERVICES_KIND = new Set(["compose"]);
 const VALID_DOWN_POLICIES = new Set(["leave_running", "down", "down_and_volumes"]);
@@ -52,7 +54,7 @@ const RIG_KEYS = new Set([
 const POD_KEYS = new Set(["id", "label", "summary", "continuity_policy", "startup", "members", "edges"]);
 const MEMBER_KEYS = new Set([
   "id", "label", "agent_ref", "profile", "runtime", "codex_config_profile",
-  "model", "role", "permission_policy", "cwd", "restore_policy", "isolation",
+  "model", "role", "permission_policy", "cwd", "restore_policy", "isolation", "setup", "gate",
   "compaction_strategy", "mechanic", "startup", "session_source", "starter_ref",
 ]);
 const EDGE_KEYS = new Set(["kind", "from", "to"]);
@@ -544,6 +546,21 @@ function validateMember(member: Record<string, unknown>, index: number, podPrefi
       errors.push(`${prefix}.isolation: must be one of ${[...VALID_ISOLATION_MODES].join(", ")} (got "${member["isolation"]}")`);
     } else if (member["isolation"] === "worktree" && isTerminalRuntime) {
       errors.push(`${prefix}.isolation: "worktree" is not valid on terminal members (a terminal node is not an agent seat)`);
+    }
+  }
+
+  // setup and gate: a command as an argument vector (never a shell string), run in the seat's own worktree.
+  for (const key of ["setup", "gate"] as const) {
+    const command = member[key];
+    if (command === undefined || command === null) continue;
+    const wellFormed = Array.isArray(command)
+      && command.length > 0
+      && command.length <= MAX_COMMAND_PARTS
+      && command.every((part) => typeof part === "string" && part.length > 0 && part.length <= MAX_COMMAND_PART_LENGTH && !part.includes("\0"));
+    if (!wellFormed) {
+      errors.push(`${prefix}.${key}: must be a list holding a command and its arguments, each a non-empty string (for example ["npm", "test"])`);
+    } else if (member["isolation"] !== "worktree") {
+      errors.push(`${prefix}.${key}: needs isolation: worktree, because it runs in the seat's own worktree`);
     }
   }
 
@@ -1139,6 +1156,8 @@ function normalizePod(raw: Record<string, unknown>): RigSpecPod {
     cwd: m["cwd"] as string,
     restorePolicy: m["restore_policy"] as string | undefined,
     isolation: (m["isolation"] ?? undefined) as "worktree" | "shared" | undefined,
+    setup: (m["setup"] ?? undefined) as string[] | undefined,
+    gate: (m["gate"] ?? undefined) as string[] | undefined,
     // OPR.0.5.6.20 A5 — aliases normalize at ingestion; absent stays undefined so the
     // resolver's F-6 default remains the one authority for absence.
     compactionStrategy: m["compaction_strategy"] !== undefined

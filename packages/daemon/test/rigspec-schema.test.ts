@@ -406,6 +406,45 @@ describe("RigSpec schema (pod-aware)", () => {
     expect(result.errors.some((e) => /isolation.*not valid on terminal members/.test(e))).toBe(true);
   });
 
+  it("member setup and gate accept a command as an argument list, and normalize it", () => {
+    const rig = structuredClone(VALID_RIG);
+    Object.assign(rig.pods[0]!.members[0] as Record<string, unknown>, {
+      isolation: "worktree", setup: ["npm", "ci"], gate: ["npm", "test", "--", "--run"],
+    });
+    expect(RigSpecSchema.validate(rig).errors).toEqual([]);
+    const member = RigSpecSchema.normalize(rig).pods[0]!.members[0]!;
+    expect(member.setup).toEqual(["npm", "ci"]);
+    expect(member.gate).toEqual(["npm", "test", "--", "--run"]);
+    expect(RigSpecSchema.normalize(structuredClone(VALID_RIG)).pods[0]!.members[0]!.gate).toBeUndefined();
+  });
+
+  it.each([
+    ["a shell string", "npm test"],
+    ["an empty list", []],
+    ["an empty part", ["npm", ""]],
+    ["a non-string part", ["npm", 1]],
+    ["a part with a NUL", ["npm", "te\0st"]],
+    ["too many parts", Array.from({ length: 65 }, () => "x")],
+  ])("member gate rejects %s", (_label, gate) => {
+    const rig = structuredClone(VALID_RIG);
+    Object.assign(rig.pods[0]!.members[0] as Record<string, unknown>, { isolation: "worktree", gate });
+    const result = RigSpecSchema.validate(rig);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /gate: must be a list holding a command and its arguments/.test(e))).toBe(true);
+  });
+
+  it("member setup and gate need isolation: worktree", () => {
+    for (const key of ["setup", "gate"]) {
+      for (const isolation of [undefined, "shared"]) {
+        const rig = structuredClone(VALID_RIG);
+        Object.assign(rig.pods[0]!.members[0] as Record<string, unknown>, { [key]: ["npm", "test"], ...(isolation ? { isolation } : {}) });
+        const result = RigSpecSchema.validate(rig);
+        expect(result.valid).toBe(false);
+        expect(result.errors.some((e) => new RegExp(`${key}: needs isolation: worktree`).test(e))).toBe(true);
+      }
+    }
+  });
+
   // R6: member agent_ref "github:foo/bar" rejected
   it("member agent_ref github: rejected", () => {
     const rig = structuredClone(VALID_RIG);
