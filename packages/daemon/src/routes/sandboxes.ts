@@ -7,10 +7,11 @@ import type { SeatGateService } from "../domain/seat-gate-service.js";
 // .../setup re-runs a seat's setup and POST .../gate runs its gate. A failing setup or gate is a normal
 // answer (200, with the result); a request that could not be attempted is a 404 or 409 with the reason.
 
-/** A sandbox failure as an HTTP answer: 404 for an unknown node, 409 for anything the caller can fix. Other errors are bugs. */
+/** A sandbox failure as an HTTP answer: 400 for a wrong request, 404 for an unknown node, 409 for anything else the caller can fix. Other errors are bugs. */
 export function sandboxFailure(c: Context, error: unknown) {
   if (!(error instanceof SandboxError)) throw error;
-  return c.json({ ok: false, code: error.code, error: error.message }, error.code === "not_found" ? 404 : 409);
+  const status = error.code === "invalid" ? 400 : error.code === "not_found" ? 404 : 409;
+  return c.json({ ok: false, code: error.code, error: error.message }, status);
 }
 
 /** Seconds from a request body to milliseconds: undefined when absent, null when present but not a sensible number. */

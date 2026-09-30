@@ -122,6 +122,7 @@ import { healthSummaryRoutes } from "./routes/health-summary.js";
 import { attentionRoutes } from "./routes/attention.js";
 import { sandboxRoutes } from "./routes/sandboxes.js";
 import { landRoutes } from "./routes/land.js";
+import { swarmRoutes } from "./routes/swarm.js";
 import { healthRoutes } from "./routes/health.js";
 import { gatewayRoutes } from "./routes/gateway.js";
 import type { StreamStore } from "./domain/stream-store.js";
@@ -174,6 +175,8 @@ export interface AppDeps {
   seatGates?: import("./domain/seat-gate-service.js").SeatGateService;
   /** Lands a rig's seats on its integration branch; `/api/land` answers 503 when absent. */
   sandboxLanding?: import("./domain/sandbox-landing-service.js").SandboxLandingService;
+  /** Plans a squad for a prompt; `/api/swarm` answers 503 when absent. */
+  swarm?: import("./domain/swarm-service.js").SwarmService;
   rigSpecExporter: RigSpecExporter;
   rigSpecPreflight: RigSpecPreflight;
   rigInstantiator: RigInstantiator;
@@ -520,6 +523,7 @@ export function createApp(deps: AppDeps): Hono {
     c.set("seatSandboxes" as never, deps.seatSandboxes);
     c.set("seatGates" as never, deps.seatGates);
     c.set("sandboxLanding" as never, deps.sandboxLanding);
+    c.set("swarm" as never, deps.swarm);
     c.set("rigSpecExporter" as never, deps.rigSpecExporter);
     c.set("rigSpecPreflight" as never, deps.rigSpecPreflight);
     c.set("rigInstantiator" as never, deps.rigInstantiator);
@@ -807,6 +811,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route("/api/attention", attentionRoutes());
   app.route("/api/sandboxes", sandboxRoutes());
   app.route("/api/land", landRoutes());
+  app.route("/api/swarm", swarmRoutes());
   app.route("/api/health-diagnosis", healthDiagnosisRoutes());
   // S10 — gateway subsystem admin (slack enable/disable with the seeding rule preserved).
   app.route("/api/gateway", gatewayRoutes());
