@@ -17,9 +17,9 @@ Squadron's goal is to run parallel agent squads in isolated Git worktrees, check
 | `squad` command, with `rig` kept as an alias | Available |
 | CLI builds and installs natively on Windows | Available |
 | Multi-agent rigs, queues, workflows, snapshot and restore (inherited from OpenRig, needs tmux) | Available |
-| `squad swarm <prompt>` | Preview: prints a backend, frontend and QA plan; launches nothing |
-| One Git worktree per agent | Available in rig specs: set `isolation: worktree` on a member. `squad swarm` does not use it yet |
-| Test gate before landing | Available in rig specs: `gate:` on a member, `squad gate run`, and `squad land`, which merges gated seats onto an integration branch and gates the result. `squad swarm` does not use them yet |
+| `squad swarm <prompt>` | Plans a backend, frontend and QA squad and shows the plan; `--launch` starts it, each seat in its own worktree with a test gate. Tested end to end with real git and a stub runtime, and not yet run against live Claude Code or Codex seats |
+| One Git worktree per agent | Available: set `isolation: worktree` on a member of a rig spec, or use `squad swarm`, which does it for every seat |
+| Test gate before landing | Available: `gate:` on a member, `squad gate run`, and `squad land`, which merges gated seats onto an integration branch and gates the result. `squad land --dry-run` shows what would land first. `squad swarm` sets the gate up for you |
 | Per-seat credential profiles | Planned |
 | Running agents on Windows through psmux | Experimental upstream work, not merged |
 
@@ -44,7 +44,7 @@ flowchart LR
   end
 ```
 
-This is the target design. Today the plan step is a preview. Worktree isolation, the gate and landing work for rig spec members, but `squad swarm` does not launch or land them yet.
+`squad swarm` does the plan step and, with `--launch`, starts the seats. The gate runs in each seat and again on the integration branch, and `squad land` does the landing when you run it: Squadron never lands work by itself.
 
 ## Quickstart
 
@@ -61,27 +61,47 @@ npm install -g ./packages/cli
 
 This puts `squad` on your PATH, along with the `rig` alias that the bundled skills and hooks call by name. npm 11 may warn that the package's postinstall check is not allowed by `allowScripts`. The install still completes.
 
-Preview a squad plan:
+Preview a squad plan. Run it inside a git repository that has at least one commit, with the daemon running (`squad start`):
 
 ```bash
 squad swarm "Build Auth API"
 ```
 
 ```text
-Swarm plan: Build Auth API
-Mission:    build-auth-api
-  backend  squad/build-auth-api/backend
-           Build the server side of: Build Auth API
-  frontend squad/build-auth-api/frontend
-           Build the client side of: Build Auth API
-  qa       squad/build-auth-api/qa
-           Write and run tests for: Build Auth API, after backend and frontend land
+Squad for: Build Auth API
+Rig build-auth-api on claude-code, working in /home/you/app
+Gate:  npm test (detected from package.json scripts.test and package-lock.json)
+Setup: npm ci (detected from package.json scripts.test and package-lock.json)
 
-Preview only. The lanes are a fixed backend / frontend / qa template, not an agent's split of your prompt.
-Agent launch is not implemented in this version. To try the rest today, give rig spec members `isolation: worktree` and a `gate`, then land the gated seats with `squad land`.
+Seats, each in its own git worktree on its own branch:
+  backend   squad/build-auth-api/swarm.backend
+            Build the server side: data, logic and API
+  frontend  squad/build-auth-api/swarm.frontend
+            Build the client side: screens and calls to the API
+  qa        squad/build-auth-api/swarm.qa
+            Write the tests from the prompt; the integration gate runs them on the merged work
+
+The lanes are a fixed backend / frontend / qa template, not an agent's reading of your prompt.
+Each seat is told the task and the working rules when it starts. To read them all: add --json.
+
+Preview only: nothing was written and nothing was started.
+Add --launch to start the squad, or --write to only write its rig spec.
 ```
 
-To run a real team of agents today, use the workflow inherited from OpenRig (macOS or Linux, with tmux):
+The gate and the install step are found from your project: `package.json` with a `test` script (npm, pnpm or yarn, by lockfile), pytest, Cargo or Go. If none is found, `squad swarm` stops and asks for `--gate "<command>"`, because `squad land` refuses lanes that have no gate. `--setup`, `--no-setup`, `--lanes backend,qa`, `--runtime codex` and `--name` change the plan.
+
+To start the squad, add `--launch` (macOS or Linux, with tmux and a logged-in Claude Code or Codex):
+
+```bash
+squad swarm "Build Auth API" --launch   # writes the rig spec under $OPENRIG_HOME/swarms/ (~/.openrig/swarms/), then runs `squad up` on it
+squad ps --nodes --rig build-auth-api   # watch the seats
+squad land build-auth-api --dry-run     # which lanes are ready, and which are not and why
+squad land build-auth-api               # merge the gated lanes onto squad/build-auth-api/integration
+```
+
+Each seat gets the task and its working rules as its first message: work only in your own worktree, commit early, stage files by name, run `squad gate run` when done, do not merge or push. `--launch` also adds `.openrig/` and `.claude/settings.local.json` to the repository's `.git/info/exclude`, so a seat's `git add -A` cannot commit the files OpenRig writes into each worktree. The rig spec goes under the instance directory, not into your repository.
+
+To run a real team of agents from your own rig spec, use the workflow inherited from OpenRig (macOS or Linux, with tmux):
 
 ```bash
 squad up first-project --cwd .
@@ -100,12 +120,13 @@ gate: ["npm", "test"]    # decides whether this seat's work may land
 ```
 
 ```bash
-squad gate run <node-id>   # run a seat's gate; the result belongs to the commit it tested
-squad land <rig>           # merge every gated seat onto squad/<rig>/integration, then gate the result
-squad land <rig> --reset   # throw the integration branch away; the seats' branches stay
+squad gate run [node-id]     # run a seat's gate; the result belongs to the commit it tested. Inside a seat's session the id is already known
+squad land <rig> --dry-run   # show which lanes would land and which are not ready; changes nothing
+squad land <rig>             # merge every gated seat onto squad/<rig>/integration, then gate the result
+squad land <rig> --reset     # throw the integration branch away; the seats' branches stay
 ```
 
-`squad land` merges only the exact commit that passed its gate, stops at the first conflict and leaves the branch as it was, and never changes your own branches. See [setup, gate and landing](docs/reference/rig-spec.md#setup-gate-and-landing).
+`squad land` merges only the exact commit that passed its gate, stops at the first conflict and leaves the branch as it was, and never changes your own branches. `--dry-run` judges the lanes the same way but does not look for merge conflicts. See [setup, gate and landing](docs/reference/rig-spec.md#setup-gate-and-landing).
 
 The [guided first-use path](docs/reference/getting-started.md) walks through it. It is written for `rig`; every command works the same with `squad`. Read [what Squadron changes on your machine](#what-openrig-changes-on-your-machine) before you launch a rig.
 
@@ -122,7 +143,7 @@ Open `squadron-visualizer.html` in a browser. Add `?t=20&paused=1` to its addres
 
 ## Built on OpenRig
 
-Squadron is a fork of [OpenRig](https://github.com/mvschwarz/openrig) v0.6.1, licensed under Apache 2.0. The daemon, runtime adapters, terminal UI, queues, workflows and the tmux control layer come from OpenRig, and this repository keeps its full history and authorship. What Squadron adds so far is the `squad` command and `rig` alias, a native Windows build of the CLI, the `squad swarm` preview, per-seat git worktrees (`isolation: worktree`), and a per-seat test gate with `squad land`. Credential profiles and launching a squad from `squad swarm` are the next milestones.
+Squadron is a fork of [OpenRig](https://github.com/mvschwarz/openrig) v0.6.1, licensed under Apache 2.0. The daemon, runtime adapters, terminal UI, queues, workflows and the tmux control layer come from OpenRig, and this repository keeps its full history and authorship. What Squadron adds so far is the `squad` command and `rig` alias, a native Windows build of the CLI, per-seat git worktrees (`isolation: worktree`), a per-seat test gate with `squad land`, and `squad swarm`, which plans a squad from a prompt and launches it with those pieces. Credential profiles and a test of `squad swarm` against live agents are the next milestones.
 
 [NOTICE](NOTICE) records the attribution. Squadron is not affiliated with or endorsed by the OpenRig project. For the inherited features in depth, see the [OpenRig README](https://github.com/mvschwarz/openrig#readme).
 

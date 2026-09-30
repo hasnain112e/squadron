@@ -247,8 +247,8 @@ piping a command so a formatter cannot hide its failing exit.
 | `policy` | Operator context-mode bindings (sleep/desk/mobile/away/focus/debug) |
 | `sandbox` | List, remove or set up the git worktrees given to seats by `isolation: worktree` |
 | `gate` | Run a seat's gate, the command that decides whether its work may land |
-| `land` | Land a rig's isolated seats on its integration branch, or throw that branch away with `--reset` |
-| `swarm` | Preview a multi-agent swarm plan for a mission (plan only; launches nothing) |
+| `land` | Land a rig's isolated seats on its integration branch, check first with `--dry-run`, or throw that branch away with `--reset` |
+| `swarm` | Plan a squad of isolated, gated agent seats for a prompt: a preview by default, `--launch` to start it |
 
 ## Core Daemon and System Commands
 
@@ -951,25 +951,41 @@ Notes:
 
 ### `rig gate`
 
-Usage: `rig gate run <node-id> [--timeout <seconds>] [--json]`
+Usage: `rig gate run [node-id] [--timeout <seconds>] [--json]`
 
 Notes:
 - Runs the seat's `gate` command (see [`docs/reference/rig-spec.md`](../reference/rig-spec.md#setup-gate-and-landing)) in its worktree and records the result against the commit it tested. `squad gate` is the same command.
+- Without a node id it uses `$OPENRIG_NODE_ID`, which OpenRig sets in every seat's session, so a seat runs its own gate with `squad gate run`. An id given on the command line wins. With neither, the command says what to give and does not contact the daemon.
 - Refuses, with the reason, when the seat has no gate, no worktree, a setup that has not passed, uncommitted changes to tracked files, or a worktree that is not on the seat's own branch. A run during which the worktree changed is recorded as not completed, never as a pass.
 - A gate that fails is a result, not an error: the command prints the end of its output and exits non-zero. A gate that passed exits 0.
 - `--timeout` stops the gate after that many seconds (default 900).
 
 ### `rig land`
 
-Usage: `rig land <rig> [--timeout <seconds>] [--json]` and `rig land <rig> --reset [--force]`
+Usage: `rig land <rig> [--dry-run] [--timeout <seconds>] [--json]` and `rig land <rig> --reset [--force]`
 
 Notes:
+- `--dry-run` judges the lanes exactly as a real land does, then stops: no integration branch, worktree, setup or gate is created or run, and nothing is recorded. It reports `ready` (with each lane that `would merge`), `not_ready` with the reason for each lane that is not, or `nothing_to_land`. It does not look for merge conflicts, so a `ready` land can still stop at one. It exits 0 for `ready` and `nothing_to_land`, and 1 for `not_ready`. It cannot be combined with `--reset`.
 - Merges the isolated seats of `<rig>` onto the branch `squad/<rig>/integration`, in its own worktree, then sets up and gates that branch. `squad land` is the same command.
 - Each seat must have a passing gate at its current tip; if any does not, nothing is merged and the command says which and what to run. The commit that passed is the commit merged.
 - The first conflict stops the landing, aborts that merge and leaves the branch as it was. The report names the files and the way out: merge the integration branch into the seat's branch, resolve, commit, gate again, land again.
 - Landing again merges only what was committed and gated since. Exits 0 when the rig landed or there was nothing new to land, and 1 for a conflict, a failed gate or setup, or lanes that are not ready.
 - `--reset` deletes the integration branch and its worktree; the seats' branches are untouched. It refuses uncommitted changes in the integration worktree unless `--force`.
 - Your own branches are never changed. Review the integration branch and merge it yourself.
+
+### `rig swarm`
+
+Usage: `rig swarm <prompt> [--launch | --write] [--lanes <lanes>] [--runtime <runtime>] [--gate <command>] [--setup <command> | --no-setup] [--name <name>] [--json]`
+
+Notes:
+- Plans a squad for the prompt and prints the plan. `squad swarm` is the same command. The daemon does the planning, so it must be running, and the command must be run from a directory inside a git repository that has at least one commit.
+- By default it is a preview and writes nothing. `--write` writes the rig spec and one shared agent spec to `$OPENRIG_HOME/swarms/<rig>/` (never into the repository) and prints the path, so you can read it and start it with `rig up <path>`. `--launch` writes the same files, hides OpenRig's per-worktree files from git (see below), and runs `rig up` on the spec. `--write` and `--launch` cannot be combined, and `--json` (which prints the whole plan, including the message each seat is sent) cannot be used with `--launch`.
+- The lanes are a fixed template, not an agent's reading of the prompt: `backend`, `frontend` and `qa`, as one pod `swarm`, so the seats are `swarm.backend`, `swarm.frontend` and `swarm.qa`. `--lanes backend,qa` picks a subset, and each seat's message only mentions the teammates that exist. QA is told to write tests from the prompt before the code exists.
+- Every seat has `isolation: worktree`, the `setup` and the `gate`, and its message as a `send_text` startup action. The rig is named from the prompt (lowercase, `-` for anything else, at most 40 characters) unless `--name` is given, and `up` refuses a name that is already running.
+- The gate and setup come from the project, in the directory the command is run in: `package.json` with a `test` script (`npm test` and `npm ci`, `pnpm` or `yarn` when their lockfile is present; a bun project is not detected), pytest, `cargo test` or `go test ./...`. If none is found the command stops and asks for `--gate`. `--gate` and `--setup` take command text, split into arguments like a shell would for words and quotes but run without a shell. `--no-setup` runs no setup.
+- `--runtime` is `claude-code` (the default) or `codex`.
+- A seat is told to work only in its own worktree, commit early, stage files by name, run `squad gate run` when its work is committed, fix and rerun if it fails, and not merge, rebase or push. Landing stays with the person: `rig land <rig> --dry-run`, then `rig land <rig>`.
+- `--launch` appends `.openrig/` and `.claude/settings.local.json` to the repository's `.git/info/exclude` (once), because starting a seat writes those files into its worktree and a `git add -A` would commit them. That file covers every worktree of the repository and is never committed.
 
 ## Identity, Communication, and Context
 
