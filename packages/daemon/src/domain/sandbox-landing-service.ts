@@ -22,7 +22,7 @@ import type { SeatSandbox, SeatSandboxService } from "./seat-sandbox-service.js"
 // integration branch is then set up and gated as a whole. The repository's own branches are never touched:
 // the result is a branch to review and merge, and `reset` throws it away.
 
-export type LaneResult = "merged" | "already_landed" | "conflict" | "not_attempted" | "not_ready";
+export type LaneResult = "merged" | "already_landed" | "conflict" | "not_attempted" | "not_ready" | "would_merge";
 
 export interface LandLane {
   nodeId: string;
@@ -46,7 +46,8 @@ export interface LandGate {
   run: GateRun;
 }
 
-export type LandOutcome = "landed" | "nothing_to_land" | "conflict" | "gate_failed" | "setup_failed" | "not_ready";
+/** "ready" is only ever the answer to a dry run: every lane could land, and none was touched. */
+export type LandOutcome = "landed" | "nothing_to_land" | "conflict" | "gate_failed" | "setup_failed" | "not_ready" | "ready";
 
 export interface LandResult {
   outcome: LandOutcome;
@@ -83,9 +84,10 @@ export class SandboxLandingService {
 
   /**
    * Land every isolated seat of `rigName` on the rig's integration branch. Safe to call again: lanes already on
-   * the branch are left alone, and only work committed and gated since is merged.
+   * the branch are left alone, and only work committed and gated since is merged. With `dryRun`, stop once the
+   * lanes are judged: no worktree, merge, setup or gate happens, so a conflict is not found, only lanes that are not ready.
    */
-  async land(rigName: string, opts: { timeoutMs?: number } = {}): Promise<LandResult> {
+  async land(rigName: string, opts: { timeoutMs?: number; dryRun?: boolean } = {}): Promise<LandResult> {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     return exclusive<LandResult>(`land:${rigName}`, `A land is already running for rig ${rigName}.`, async () => {
       const seats = this.sandboxes.forRig(rigName).filter((seat) => seat.state === "provisioned" && seat.branch !== null);
@@ -103,6 +105,10 @@ export class SandboxLandingService {
       if (lanes.some((lane) => lane.result === "not_ready")) return { ...base, outcome: "not_ready", tipSha: reference };
       const pending = lanes.filter((lane) => lane.result === "not_attempted");
       if (pending.length === 0 && !existing) return { ...base, outcome: "nothing_to_land", tipSha: reference };
+      if (opts.dryRun) {
+        for (const lane of pending) lane.result = "would_merge";
+        return { ...base, outcome: pending.length === 0 ? "nothing_to_land" : "ready", tipSha: reference };
+      }
 
       const integrationId = this.sandboxes.requestIntegration({ rigName, repoPath: seats[0]!.repoPath });
       await this.sandboxes.provision(integrationId);

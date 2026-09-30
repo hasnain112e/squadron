@@ -184,6 +184,25 @@ describe("/api/sandboxes", { timeout: 30_000 }, () => {
       expect(await reset.json()).toEqual({ ok: true, worktreeRemoved: true, branchDeleted: true });
     });
 
+    it("judges the lanes without landing them when dryRun is true, and refuses a dryRun that is not true or false", async () => {
+      const { app, node: seat, sandboxes } = boot(true, { gate: node("process.exit(0)") });
+      const cwd = (await sandboxes.provision(seat.id))!;
+      commitInWorktree(cwd, "feature.txt");
+      expect((await post(app, `/api/sandboxes/${seat.id}/gate`)).status).toBe(200);
+
+      const dry = await post(app, "/api/land", { rig: "demo", dryRun: true });
+      expect(dry.status).toBe(200);
+      expect(await dry.json()).toMatchObject({ ok: true, result: { outcome: "ready", lanes: [{ seat: "dev.impl", result: "would_merge" }], gates: [] } });
+      expect(execFileSync("git", ["-C", repo, "branch", "--list", "squad/demo/integration"], { encoding: "utf8" })).toBe("");
+
+      const invalid = await post(app, "/api/land", { rig: "demo", dryRun: "yes" });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toMatchObject({ ok: false, code: "invalid" });
+
+      // A dry run left everything as it was, so the real land follows.
+      expect(await (await post(app, "/api/land", { rig: "demo", dryRun: false })).json()).toMatchObject({ result: { outcome: "landed" } });
+    });
+
     it("answers 404 for a rig with nothing to land, and 400 for a request that names no rig", async () => {
       const { app } = boot(true, {});
 
