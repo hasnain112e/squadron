@@ -173,6 +173,35 @@ describe("RigSpec codec (pod-aware)", () => {
     expect(members[1]!.isolation).toBeUndefined();
   });
 
+  it("setup and gate round-trip through serialize → parse → validate → normalize", () => {
+    const spec: RigSpec = {
+      ...VALID_RIG,
+      pods: [
+        {
+          id: "dev",
+          label: "Development",
+          members: [
+            { id: "impl", agentRef: "local:agents/impl", profile: "default", runtime: "claude-code", cwd: ".", isolation: "worktree", setup: ["npm", "ci"], gate: ["npm", "test"] },
+            { id: "qa", agentRef: "local:agents/qa", profile: "default", runtime: "codex", cwd: "." },
+          ],
+          edges: [],
+        },
+      ],
+    };
+
+    const yaml = RigSpecCodec.serialize(spec);
+    expect(yaml.match(/setup:/g)).toHaveLength(1);
+    expect(yaml.match(/gate:/g)).toHaveLength(1);
+
+    const parsed = RigSpecCodec.parse(yaml);
+    expect(RigSpecSchema.validate(parsed).errors).toEqual([]);
+    const members = RigSpecSchema.normalize(parsed).pods[0]!.members;
+    expect(members[0]!.setup).toEqual(["npm", "ci"]);
+    expect(members[0]!.gate).toEqual(["npm", "test"]);
+    expect(members[1]!.setup).toBeUndefined();
+    expect(members[1]!.gate).toBeUndefined();
+  });
+
   it("starter_ref + session_source.mode='rebuild' both survive roundtrip (composition allowed)", () => {
     const spec: RigSpec = {
       ...VALID_RIG,

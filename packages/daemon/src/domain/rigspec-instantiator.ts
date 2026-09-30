@@ -1179,7 +1179,7 @@ export class PodRigInstantiator {
     const initialRefusal = eligible();
     if (initialRefusal) return refuse(initialRefusal);
 
-    const retainedFields = new Set(["id", "label", "agent_ref", "profile", "runtime", "model", "cwd", "role", "codex_config_profile", "permission_policy", "restore_policy", "isolation"]);
+    const retainedFields = new Set(["id", "label", "agent_ref", "profile", "runtime", "model", "cwd", "role", "codex_config_profile", "permission_policy", "restore_policy", "isolation", "setup", "gate"]);
     if (Object.keys(memberFragment).some(key => !retainedFields.has(key))) return refuse("Retry accepts only retained member fields; topology and startup overrides require a separate change.");
     const rawSpec = { version: "0.2", name: rig.rig.name, pods: [{ id: podRow.namespace, label: podRow.label, members: [memberFragment], edges: [] }], edges: [] };
     const validation = PodRigSpecSchema.validate(rawSpec);
@@ -1198,7 +1198,9 @@ export class PodRigInstantiator {
     if (`${pod.id}.${member.id}` !== node.logicalId || !same(member.agentRef, node.agentRef) || !same(member.profile, node.profile)
       || !same(member.runtime, node.runtime) || !same(member.role, node.role) || !same(member.label, node.label) || !same(member.codexConfigProfile, node.codexConfigProfile)
       || !same(member.permissionPolicy, node.permissionPolicy)
-      || (member.isolation === "worktree") !== (sandbox !== null)) return refuse("Member source disagrees with the retained seat identity or policy.");
+      || (member.isolation === "worktree") !== (sandbox !== null)
+      || JSON.stringify(member.setup ?? null) !== JSON.stringify(sandbox?.setup ?? null)
+      || JSON.stringify(member.gate ?? null) !== JSON.stringify(sandbox?.gate ?? null)) return refuse("Member source disagrees with the retained seat identity or policy.");
     const resolved = resolveAgentRef(member.agentRef, rigRoot, this.deps.fsOps);
     if (!resolved.ok) return refuse(resolved.code === "validation_failed" ? resolved.errors.join("; ") : resolved.error);
     if (!node.resolvedSpecHash || resolved.resolved.hash !== node.resolvedSpecHash) return refuse("Agent source hash differs from the failed first start.");
@@ -1762,7 +1764,14 @@ export class PodRigInstantiator {
     if (!this.deps.sandboxes) {
       throw new Error(`${input.qualifiedId}: isolation: worktree needs the seat sandbox service, which this daemon does not have.`);
     }
-    this.deps.sandboxes.request({ nodeId: input.nodeId, rigId: input.rigId, seat: input.qualifiedId, repoPath: input.repoPath });
+    this.deps.sandboxes.request({
+      nodeId: input.nodeId,
+      rigId: input.rigId,
+      seat: input.qualifiedId,
+      repoPath: input.repoPath,
+      setup: input.member.setup,
+      gate: input.member.gate,
+    });
   }
 
   /**

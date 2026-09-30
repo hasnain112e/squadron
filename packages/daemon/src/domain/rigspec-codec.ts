@@ -164,6 +164,8 @@ export class RigSpecCodec {
         if (m.restorePolicy) member["restore_policy"] = m.restorePolicy;
         // parse carries it (schema normalize), so serialize must too — same silent-erasure class.
         if (m.isolation) member["isolation"] = m.isolation;
+        if (m.setup) member["setup"] = m.setup;
+        if (m.gate) member["gate"] = m.gate;
         if (m.startup) member["startup"] = serializeStartupBlock(m.startup);
         // OPR.0.5.6.20 field, OPR.0.5.6.23 fix: parse carries it (schema
         // normalize), so serialize must too — same silent-erasure class.

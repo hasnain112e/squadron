@@ -245,7 +245,9 @@ piping a command so a formatter cannot hide its failing exit.
 | `plugin` | Inspect plugins (read-only) — list, show, used-by, validate |
 | `scope` | Scope tree primitive — missions, slices, sub-slices |
 | `policy` | Operator context-mode bindings (sleep/desk/mobile/away/focus/debug) |
-| `sandbox` | List or remove the git worktrees given to seats by `isolation: worktree` |
+| `sandbox` | List, remove or set up the git worktrees given to seats by `isolation: worktree` |
+| `gate` | Run a seat's gate, the command that decides whether its work may land |
+| `land` | Land a rig's isolated seats on its integration branch, or throw that branch away with `--reset` |
 | `swarm` | Preview a multi-agent swarm plan for a mission (plan only; launches nothing) |
 
 ## Core Daemon and System Commands
@@ -937,7 +939,7 @@ Notes:
 
 ### `rig sandbox`
 
-Usage: `rig sandbox ls [--all] [--json]` and `rig sandbox rm <node-id> [--force]`
+Usage: `rig sandbox ls [--all] [--json]`, `rig sandbox rm <node-id> [--force]` and `rig sandbox setup <node-id> [--timeout <seconds>] [--json]`
 
 Notes:
 - Manages the git worktrees that `isolation: worktree` gives to seats (see [`docs/reference/rig-spec.md`](../reference/rig-spec.md#worktree-isolation)). `squad sandbox` is the same command.
@@ -945,6 +947,29 @@ Notes:
 - `rm` removes one seat's worktree. It refuses while the seat has a running session or the worktree has uncommitted changes; `--force` overrides both.
 - `rm` deletes the seat's branch only when git reports it fully merged (`git branch -d`). A branch with unmerged commits is kept and the command says so.
 - Removing a sandbox does not stop or change the seat. The next launch of a seat that still declares `isolation: worktree` makes a fresh worktree, reusing the branch if it was kept.
+- `setup` runs the seat's `setup` command again in its worktree and records whether it passed. Setup runs by itself when a worktree is new; use this after a failure has been fixed or a lockfile changed. Exits non-zero unless it passed. The rig's integration worktree (see `rig land`) is listed too, as `integration:<rig>`.
+
+### `rig gate`
+
+Usage: `rig gate run <node-id> [--timeout <seconds>] [--json]`
+
+Notes:
+- Runs the seat's `gate` command (see [`docs/reference/rig-spec.md`](../reference/rig-spec.md#setup-gate-and-landing)) in its worktree and records the result against the commit it tested. `squad gate` is the same command.
+- Refuses, with the reason, when the seat has no gate, no worktree, a setup that has not passed, uncommitted changes to tracked files, or a worktree that is not on the seat's own branch. A run during which the worktree changed is recorded as not completed, never as a pass.
+- A gate that fails is a result, not an error: the command prints the end of its output and exits non-zero. A gate that passed exits 0.
+- `--timeout` stops the gate after that many seconds (default 900).
+
+### `rig land`
+
+Usage: `rig land <rig> [--timeout <seconds>] [--json]` and `rig land <rig> --reset [--force]`
+
+Notes:
+- Merges the isolated seats of `<rig>` onto the branch `squad/<rig>/integration`, in its own worktree, then sets up and gates that branch. `squad land` is the same command.
+- Each seat must have a passing gate at its current tip; if any does not, nothing is merged and the command says which and what to run. The commit that passed is the commit merged.
+- The first conflict stops the landing, aborts that merge and leaves the branch as it was. The report names the files and the way out: merge the integration branch into the seat's branch, resolve, commit, gate again, land again.
+- Landing again merges only what was committed and gated since. Exits 0 when the rig landed or there was nothing new to land, and 1 for a conflict, a failed gate or setup, or lanes that are not ready.
+- `--reset` deletes the integration branch and its worktree; the seats' branches are untouched. It refuses uncommitted changes in the integration worktree unless `--force`.
+- Your own branches are never changed. Review the integration branch and merge it yourself.
 
 ## Identity, Communication, and Context
 

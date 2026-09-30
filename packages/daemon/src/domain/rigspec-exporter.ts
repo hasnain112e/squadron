@@ -178,6 +178,8 @@ export class RigSpecExporter {
         if (sandbox) {
           member.cwd = sandbox.repoPath;
           member.isolation = sandbox.mode;
+          if (sandbox.setup) member.setup = sandbox.setup;
+          if (sandbox.gate) member.gate = sandbox.gate;
         }
         return member;
       });

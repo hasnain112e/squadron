@@ -55,6 +55,7 @@ import { inventoryEventIndexesSchema } from "../../src/db/migrations/084_invento
 import { rigClaudeManagedBlockFileSchema } from "../../src/db/migrations/085_rig_claude_managed_block_file.js";
 import { nodePermissionSelectionsSchema } from "../../src/db/migrations/088_node_permission_selections.js";
 import { nodeSandboxesSchema } from "../../src/db/migrations/090_node_sandboxes.js";
+import { sandboxSetupGateSchema } from "../../src/db/migrations/091_sandbox_setup_gate.js";
 import { rigPolicySchema } from "../../src/db/migrations/041_rig_policy.js";
 import { rigArchiveSchema } from "../../src/db/migrations/042_rig_archive.js";
 import { resumeProvenanceSchema } from "../../src/db/migrations/043_resume_provenance.js";
@@ -89,6 +90,8 @@ import { EventBus } from "../../src/domain/event-bus.js";
 import { QueueRepository } from "../../src/domain/queue-repository.js";
 import { NodeLauncher } from "../../src/domain/node-launcher.js";
 import type { SeatSandboxService } from "../../src/domain/seat-sandbox-service.js";
+import { SeatGateService } from "../../src/domain/seat-gate-service.js";
+import { SandboxLandingService } from "../../src/domain/sandbox-landing-service.js";
 import { SnapshotRepository } from "../../src/domain/snapshot-repository.js";
 import { CheckpointStore } from "../../src/domain/checkpoint-store.js";
 import { SnapshotCapture } from "../../src/domain/snapshot-capture.js";
@@ -118,7 +121,7 @@ import fs from "node:fs";
 
 /** Seam B R6: the canonical full-fixture migration list, exported so file-backed
  *  DB-reopen tests migrate IDENTICALLY to createFullTestDb. */
-export const migrationsForFullTestDb = [coreSchema, bindingsSessionsSchema, eventsSchema, snapshotsSchema, checkpointsSchema, resumeMetadataSchema, nodeSpecFieldsSchema, packagesSchema, installJournalSchema, journalSeqSchema, bootstrapSchema, discoverySchema, discoveryFkFix, agentspecRebootSchema, startupContextSchema, chatMessagesSchema, podNamespaceSchema, contextUsageSchema, externalCliAttachmentSchema, rigServicesSchema, seatHandoverObservabilitySchema, nodeCodexConfigProfileSchema, nodePermissionPolicySchema, rigPermissionPolicySchema, nodePolicyProvenanceSchema, rigPolicyProvenanceSchema, streamItemsSchema, queueItemsSchema, queueTransitionsSchema, rigPolicySchema, rigArchiveSchema, resumeProvenanceSchema, resumeVerificationSchema, seatIdentityVerdictsSchema, selfHostIdentitySchema, occupantTenuresSchema, daemonLifecycleSchema, watchdogJobsSchema, occupantGenerationStampsSchema, projectionManifestSchema, watchdogTargetGenerationSchema, appliedLaunchObservationsSchema, appliedLaunchObservationInvalidationsSchema, threadSeatMapSchema, queueTransitionWakesSchema, nodeSessionSourceSchema, scopedOperatingPostureSchema, humanNotificationIntentSchema, reviewReadIndexesSchema, inventoryEventIndexesSchema, rigClaudeManagedBlockFileSchema, nodePermissionSelectionsSchema, nodeSandboxesSchema];
+export const migrationsForFullTestDb = [coreSchema, bindingsSessionsSchema, eventsSchema, snapshotsSchema, checkpointsSchema, resumeMetadataSchema, nodeSpecFieldsSchema, packagesSchema, installJournalSchema, journalSeqSchema, bootstrapSchema, discoverySchema, discoveryFkFix, agentspecRebootSchema, startupContextSchema, chatMessagesSchema, podNamespaceSchema, contextUsageSchema, externalCliAttachmentSchema, rigServicesSchema, seatHandoverObservabilitySchema, nodeCodexConfigProfileSchema, nodePermissionPolicySchema, rigPermissionPolicySchema, nodePolicyProvenanceSchema, rigPolicyProvenanceSchema, streamItemsSchema, queueItemsSchema, queueTransitionsSchema, rigPolicySchema, rigArchiveSchema, resumeProvenanceSchema, resumeVerificationSchema, seatIdentityVerdictsSchema, selfHostIdentitySchema, occupantTenuresSchema, daemonLifecycleSchema, watchdogJobsSchema, occupantGenerationStampsSchema, projectionManifestSchema, watchdogTargetGenerationSchema, appliedLaunchObservationsSchema, appliedLaunchObservationInvalidationsSchema, threadSeatMapSchema, queueTransitionWakesSchema, nodeSessionSourceSchema, scopedOperatingPostureSchema, humanNotificationIntentSchema, reviewReadIndexesSchema, inventoryEventIndexesSchema, rigClaudeManagedBlockFileSchema, nodePermissionSelectionsSchema, nodeSandboxesSchema, sandboxSetupGateSchema];
 
 /**
  * P24 — the DECLARED exclusions for {@link migrationsForFullTestDb}. That list is deliberately a
@@ -403,9 +406,13 @@ export function createTestApp(
   };
   const upRouter = new UpCommandRouter({ fsOps: upRouterFs });
 
+  // With a sandbox service, the gate and landing services come with it, built the way startup builds them.
+  const seatGates = opts?.sandboxes ? new SeatGateService(db, opts.sandboxes) : undefined;
+  const sandboxLanding = opts?.sandboxes && seatGates ? new SandboxLandingService(opts.sandboxes, seatGates) : undefined;
+
   const app = createApp({
     rigRepo, sessionRegistry, eventBus, nodeLauncher, startupOrchestrator, tmuxAdapter: tmux, cmuxAdapter: cmux,
-    snapshotCapture, snapshotRepo, restoreOrchestrator, seatSandboxes: opts?.sandboxes,
+    snapshotCapture, snapshotRepo, restoreOrchestrator, seatSandboxes: opts?.sandboxes, seatGates, sandboxLanding,
     rigSpecExporter, rigSpecPreflight, rigInstantiator,
     packageRepo, installRepo, installEngine, installVerifier,
     bootstrapOrchestrator, bootstrapRepo,
@@ -449,5 +456,6 @@ export function createTestApp(
     podInstantiator, podBundleSourceResolver, db, tmuxAdapter: tmux,
     agentActivityStore,
     startupOrchestrator,
+    seatGates, sandboxLanding,
   };
 }

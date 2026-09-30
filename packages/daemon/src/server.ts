@@ -121,6 +121,7 @@ import { steeringRoutes } from "./routes/steering.js";
 import { healthSummaryRoutes } from "./routes/health-summary.js";
 import { attentionRoutes } from "./routes/attention.js";
 import { sandboxRoutes } from "./routes/sandboxes.js";
+import { landRoutes } from "./routes/land.js";
 import { healthRoutes } from "./routes/health.js";
 import { gatewayRoutes } from "./routes/gateway.js";
 import type { StreamStore } from "./domain/stream-store.js";
@@ -169,6 +170,10 @@ export interface AppDeps {
   resumeMetadataRefresher?: import("./domain/resume-metadata-refresher.js").ResumeMetadataRefresher;
   /** Seat worktrees created by `isolation: worktree`; `/api/sandboxes` answers 503 when absent. */
   seatSandboxes?: import("./domain/seat-sandbox-service.js").SeatSandboxService;
+  /** Runs a seat's gate; `/api/sandboxes/:nodeId/gate` answers 503 when absent. */
+  seatGates?: import("./domain/seat-gate-service.js").SeatGateService;
+  /** Lands a rig's seats on its integration branch; `/api/land` answers 503 when absent. */
+  sandboxLanding?: import("./domain/sandbox-landing-service.js").SandboxLandingService;
   rigSpecExporter: RigSpecExporter;
   rigSpecPreflight: RigSpecPreflight;
   rigInstantiator: RigInstantiator;
@@ -513,6 +518,8 @@ export function createApp(deps: AppDeps): Hono {
     c.set("restoreOrchestrator" as never, deps.restoreOrchestrator);
     c.set("resumeMetadataRefresher" as never, deps.resumeMetadataRefresher);
     c.set("seatSandboxes" as never, deps.seatSandboxes);
+    c.set("seatGates" as never, deps.seatGates);
+    c.set("sandboxLanding" as never, deps.sandboxLanding);
     c.set("rigSpecExporter" as never, deps.rigSpecExporter);
     c.set("rigSpecPreflight" as never, deps.rigSpecPreflight);
     c.set("rigInstantiator" as never, deps.rigInstantiator);
@@ -799,6 +806,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route("/api/health", healthRoutes());
   app.route("/api/attention", attentionRoutes());
   app.route("/api/sandboxes", sandboxRoutes());
+  app.route("/api/land", landRoutes());
   app.route("/api/health-diagnosis", healthDiagnosisRoutes());
   // S10 — gateway subsystem admin (slack enable/disable with the seeding rule preserved).
   app.route("/api/gateway", gatewayRoutes());

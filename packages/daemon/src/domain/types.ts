@@ -1085,6 +1085,12 @@ export interface RigSpecPodMember {
   /** Where the seat's files live. `worktree` gives the seat its own git worktree and branch at
    *  launch; absent or `shared` keeps the authored cwd itself. */
   isolation?: "worktree" | "shared";
+  /** A command, as an argument vector, run once in the seat's fresh worktree before the seat starts
+   *  (for example `["npm", "ci"]`). Needs `isolation: worktree`. */
+  setup?: string[];
+  /** A command, as an argument vector, that decides whether the seat's work may land (for example
+   *  `["npm", "test"]`). Runs in the seat's worktree. Needs `isolation: worktree`. */
+  gate?: string[];
   /** OPR.0.5.6.20 — per-member continuity override (most-specific-wins; canonical or
    *  deprecated-alias spelling, normalized at resolution). Absent = inherit. */
   compactionStrategy?: string;

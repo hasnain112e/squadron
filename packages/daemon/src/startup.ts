@@ -23,6 +23,8 @@ import { loadHumanRegistry } from "./domain/gateway/human-registry.js";
 import { EventBus } from "./domain/event-bus.js";
 import { NodeLauncher } from "./domain/node-launcher.js";
 import { SeatSandboxService } from "./domain/seat-sandbox-service.js";
+import { SeatGateService } from "./domain/seat-gate-service.js";
+import { SandboxLandingService } from "./domain/sandbox-landing-service.js";
 import { TmuxOptionDefaultsApplier } from "./domain/tmux-option-defaults.js";
 import { TmuxAdapter } from "./adapters/tmux.js";
 import { CmuxAdapter } from "./adapters/cmux.js";
@@ -506,6 +508,8 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     },
   });
   const seatSandboxes = new SeatSandboxService(db);
+  const seatGates = new SeatGateService(db, seatSandboxes);
+  const sandboxLanding = new SandboxLandingService(seatSandboxes, seatGates);
   const nodeLauncher = new NodeLauncher({
     db,
     rigRepo,
@@ -1078,6 +1082,8 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     restoreOrchestrator,
     resumeMetadataRefresher, // OPR.0.4.3.20 FR-4 — manual snapshot refresh-before-serialize
     seatSandboxes,
+    seatGates,
+    sandboxLanding,
     rigSpecExporter,
     rigSpecPreflight,
     rigInstantiator,
