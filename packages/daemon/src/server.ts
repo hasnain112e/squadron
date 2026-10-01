@@ -123,6 +123,7 @@ import { attentionRoutes } from "./routes/attention.js";
 import { sandboxRoutes } from "./routes/sandboxes.js";
 import { landRoutes } from "./routes/land.js";
 import { swarmRoutes } from "./routes/swarm.js";
+import { cockpitRoutes } from "./routes/cockpit.js";
 import { healthRoutes } from "./routes/health.js";
 import { gatewayRoutes } from "./routes/gateway.js";
 import type { StreamStore } from "./domain/stream-store.js";
@@ -177,6 +178,8 @@ export interface AppDeps {
   sandboxLanding?: import("./domain/sandbox-landing-service.js").SandboxLandingService;
   /** Plans a squad for a prompt; `/api/swarm` answers 503 when absent. */
   swarm?: import("./domain/swarm-service.js").SwarmService;
+  /** The read-only view behind the dual cockpit; `/api/cockpit/:rig` answers 503 when absent. */
+  cockpit?: import("./domain/cockpit-service.js").CockpitService;
   rigSpecExporter: RigSpecExporter;
   rigSpecPreflight: RigSpecPreflight;
   rigInstantiator: RigInstantiator;
@@ -358,6 +361,8 @@ export interface AppDeps {
   serviceOrchestrator?: import("./domain/service-orchestrator.js").ServiceOrchestrator;
   composeAdapter?: import("./adapters/compose-services-adapter.js").ComposeServicesAdapter;
   uiDistDir?: string | null;
+  /** Where `/cockpit` reads the dual cockpit page from. Default: the repository's assets/dual-cockpit.html. */
+  cockpitPagePath?: string;
   /** V0.3.1 slice 05 kernel-rig-as-default — forward-fix #3 architectural.
    *  Tracker exposed via GET /api/kernel/status. Optional because tests
    *  + custom daemon compositions may construct AppDeps without auto-
@@ -404,6 +409,11 @@ const MIME_TYPES: Record<string, string> = {
 
 function resolveDefaultUiDistDir(): string {
   return nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), "..", "..", "ui", "dist");
+}
+
+/** The dual cockpit page lives in the repository's assets/, three levels up from this file (src/ or dist/). */
+function resolveCockpitPagePath(): string {
+  return nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "assets", "dual-cockpit.html");
 }
 
 function safeResolveUiPath(uiDistDir: string, requestPath: string): string | null {
@@ -524,6 +534,7 @@ export function createApp(deps: AppDeps): Hono {
     c.set("seatGates" as never, deps.seatGates);
     c.set("sandboxLanding" as never, deps.sandboxLanding);
     c.set("swarm" as never, deps.swarm);
+    c.set("cockpit" as never, deps.cockpit);
     c.set("rigSpecExporter" as never, deps.rigSpecExporter);
     c.set("rigSpecPreflight" as never, deps.rigSpecPreflight);
     c.set("rigInstantiator" as never, deps.rigInstantiator);
@@ -812,6 +823,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route("/api/sandboxes", sandboxRoutes());
   app.route("/api/land", landRoutes());
   app.route("/api/swarm", swarmRoutes());
+  app.route("/api/cockpit", cockpitRoutes());
   app.route("/api/health-diagnosis", healthDiagnosisRoutes());
   // S10 — gateway subsystem admin (slack enable/disable with the seeding rule preserved).
   app.route("/api/gateway", gatewayRoutes());
@@ -827,6 +839,21 @@ export function createApp(deps: AppDeps): Hono {
   app.all("/api/*", async (c, next) => {
     if (c.req.path === "/api") return next();
     return c.json({ error: "not_found", path: c.req.path }, 404);
+  });
+
+  // The dual cockpit page is a repository file, so it is served only where the repository is, and anywhere else
+  // answers 404 with that reason. It is served from here and not opened as a file because it reads this daemon's
+  // API, which allows no cross-origin requests. The bearer token reaches it the way it reaches the UI.
+  app.get("/cockpit", (c) => {
+    const page = deps.cockpitPagePath ?? resolveCockpitPagePath();
+    if (!fs.existsSync(page)) {
+      return c.json({ error: "cockpit_page_missing", hint: "The dual cockpit page is assets/dual-cockpit.html in the Squadron repository. This install does not include it." }, 404);
+    }
+    const html = fs.readFileSync(page, "utf-8");
+    const tokenScript = deps.terminalBearerToken
+      ? `<script>window.__SQUADRON_TOKEN__=${JSON.stringify(deps.terminalBearerToken).replace(/</g, "\\u003c")}</script>`
+      : "";
+    return c.html(tokenScript ? html.replace("</head>", `${tokenScript}</head>`) : html);
   });
 
   const uiDistDir = deps.uiDistDir ?? resolveDefaultUiDistDir();

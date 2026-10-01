@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createDaemon } from "../src/startup.js";
 import { SwarmService } from "../src/domain/swarm-service.js";
+import { CockpitService } from "../src/domain/cockpit-service.js";
 import type { CmuxTransportFactory } from "../src/adapters/cmux.js";
 import type { ExecFn } from "../src/adapters/tmux.js";
 
@@ -48,6 +49,28 @@ describe("createDaemon serves squad swarm", { timeout: 60_000 }, () => {
     } finally {
       db.close();
       fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("serves the dual cockpit: its view of a rig, and its page", async () => {
+    const cmuxFactory: CmuxTransportFactory = async () => {
+      throw Object.assign(new Error("no socket"), { code: "ENOENT" });
+    };
+    const tmuxExec: ExecFn = async () => "";
+    const { app, db, deps } = await createDaemon({ cmuxFactory, tmuxExec });
+    try {
+      expect(deps.cockpit).toBeInstanceOf(CockpitService);
+
+      // The cockpit's own answer for a rig that is not there, not the catch-all `{ error, path }` an unmounted route would give.
+      const view = await app.request("/api/cockpit/no-such-rig");
+      expect(view.status).toBe(404);
+      expect(await view.json()).toMatchObject({ ok: false, code: "not_found", error: expect.stringContaining("no-such-rig") });
+
+      const page = await app.request("/cockpit");
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("<title>Squadron cockpit</title>");
+    } finally {
+      db.close();
     }
   });
 });

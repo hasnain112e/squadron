@@ -26,6 +26,7 @@ import { SeatSandboxService } from "./domain/seat-sandbox-service.js";
 import { SeatGateService } from "./domain/seat-gate-service.js";
 import { SandboxLandingService } from "./domain/sandbox-landing-service.js";
 import { SwarmService } from "./domain/swarm-service.js";
+import { CockpitService } from "./domain/cockpit-service.js";
 import { TmuxOptionDefaultsApplier } from "./domain/tmux-option-defaults.js";
 import { TmuxAdapter } from "./adapters/tmux.js";
 import { CmuxAdapter } from "./adapters/cmux.js";
@@ -521,6 +522,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const seatGates = new SeatGateService(db, seatSandboxes);
   const sandboxLanding = new SandboxLandingService(seatSandboxes, seatGates);
   const swarm = new SwarmService(OPENRIG_HOME);
+  const cockpit = new CockpitService({ db, rigRepo, sandboxes: seatSandboxes, gates: seatGates, landing: sandboxLanding });
   const nodeLauncher = new NodeLauncher({
     db,
     rigRepo,
@@ -1100,6 +1102,7 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
     seatGates,
     sandboxLanding,
     swarm,
+    cockpit,
     rigSpecExporter,
     rigSpecPreflight,
     rigInstantiator,
