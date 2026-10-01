@@ -853,7 +853,8 @@ export function createApp(deps: AppDeps): Hono {
     const tokenScript = deps.terminalBearerToken
       ? `<script>window.__SQUADRON_TOKEN__=${JSON.stringify(deps.terminalBearerToken).replace(/</g, "\\u003c")}</script>`
       : "";
-    return c.html(tokenScript ? html.replace("</head>", `${tokenScript}</head>`) : html);
+    // A function, not a string, as the replacement: a token containing "$&" or "$'" must not be read as a pattern.
+    return c.html(tokenScript ? html.replace("</head>", () => `${tokenScript}</head>`) : html);
   });
 
   const uiDistDir = deps.uiDistDir ?? resolveDefaultUiDistDir();

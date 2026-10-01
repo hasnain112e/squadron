@@ -160,6 +160,18 @@ describe("/api/cockpit", { timeout: 60_000 }, () => {
     expect(body.cockpit.seats.map((seat: { seat: string }) => seat.seat)).toEqual(["new.seat"]);
   });
 
+  it("finds a rig whose name URLs escape, decoding the name once", async () => {
+    const t = boot();
+    const names = ["my rig", "100%", "a%20b"];
+    for (const name of names) t.rigRepo.createRig(name);
+
+    for (const name of names) {
+      const { status, body } = await get(t, name);
+      expect(status, name).toBe(200);
+      expect(body.cockpit.rig.name).toBe(name);
+    }
+  });
+
   describe("GET /cockpit, the page", () => {
     const pageFile = path.resolve(import.meta.dirname, "../../../assets/dual-cockpit.html");
 
@@ -181,6 +193,15 @@ describe("/api/cockpit", { timeout: 60_000 }, () => {
 
       const without = createTestApp(createFullTestDb());
       expect(await (await without.app.request("/cockpit")).text()).not.toContain("__SQUADRON_TOKEN__=");
+    });
+
+    it("hands over a token that contains replacement patterns exactly as it is", async () => {
+      const token = "a$&b$'c$`d$$e";
+      const html = await (await createTestApp(createFullTestDb(), { terminalBearerToken: token }).app.request("/cockpit")).text();
+      const script = `<script>window.__SQUADRON_TOKEN__=${JSON.stringify(token)}</script>`;
+
+      expect(html).toContain(`${script}</head>`);
+      expect(html.length).toBe(fs.readFileSync(pageFile, "utf-8").length + script.length);
     });
 
     it("says why when the page is not part of the install", async () => {
