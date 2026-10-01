@@ -16,6 +16,19 @@ describe("graphics runtime package", () => {
     expect(runtimeBrand("codex").label).toBe("Codex");
   });
 
+  it("gives a Gemini seat its own label and mark, not the unknown one", () => {
+    expect(normalizeRuntimeBrandId("gemini")).toBe("gemini");
+    expect(normalizeRuntimeBrandId("Gemini CLI")).toBe("gemini");
+    expect(runtimeBrand("gemini").label).toBe("Gemini");
+    expect(normalizeRuntimeBrandId("pi")).toBe("pi");
+
+    const { container } = render(<RuntimeBadge runtime="gemini" model="gemini-2.5-pro" />);
+    expect(screen.getByText("Gemini")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Gemini" })).toBeTruthy();
+    expect(screen.queryByText("Unknown")).toBeNull();
+    expect(container.firstElementChild?.className).toContain("1f4aa0");
+  });
+
   it("normalizes tool brands for CMUX, tmux, VS Code, and screenshots", () => {
     expect(normalizeToolBrandId("cmux")).toBe("cmux");
     expect(normalizeToolBrandId("tmux attach")).toBe("tmux");

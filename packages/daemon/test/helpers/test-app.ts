@@ -93,6 +93,7 @@ import type { SeatSandboxService } from "../../src/domain/seat-sandbox-service.j
 import { SeatGateService } from "../../src/domain/seat-gate-service.js";
 import { SandboxLandingService } from "../../src/domain/sandbox-landing-service.js";
 import { SwarmService } from "../../src/domain/swarm-service.js";
+import { CockpitService } from "../../src/domain/cockpit-service.js";
 import { SnapshotRepository } from "../../src/domain/snapshot-repository.js";
 import { CheckpointStore } from "../../src/domain/checkpoint-store.js";
 import { SnapshotCapture } from "../../src/domain/snapshot-capture.js";
@@ -263,6 +264,9 @@ export function createTestApp(
     sandboxes?: SeatSandboxService;
     /** Wire `squad swarm` planning, writing specs under this directory (the instance directory in production). Default: none. */
     swarmHome?: string;
+    /** Where `/cockpit` reads the dual cockpit page from (default: the repository's assets/dual-cockpit.html), and the bearer token it hands the page. */
+    cockpitPagePath?: string;
+    terminalBearerToken?: string;
     /** Managed Claude activity-hook delivery asset paths, forwarded to the PodRigInstantiator
      *  (defaults to daemon-shipped assets). Tests inject fixtures to exercise the nonfatal
      *  delivery-gap warning through the real /api/up route. */
@@ -413,10 +417,14 @@ export function createTestApp(
   const seatGates = opts?.sandboxes ? new SeatGateService(db, opts.sandboxes) : undefined;
   const sandboxLanding = opts?.sandboxes && seatGates ? new SandboxLandingService(opts.sandboxes, seatGates) : undefined;
   const swarm = opts?.swarmHome ? new SwarmService(opts.swarmHome) : undefined;
+  const cockpit = opts?.sandboxes && seatGates && sandboxLanding
+    ? new CockpitService({ db, rigRepo, sandboxes: opts.sandboxes, gates: seatGates, landing: sandboxLanding })
+    : undefined;
 
   const app = createApp({
     rigRepo, sessionRegistry, eventBus, nodeLauncher, startupOrchestrator, tmuxAdapter: tmux, cmuxAdapter: cmux,
-    snapshotCapture, snapshotRepo, restoreOrchestrator, seatSandboxes: opts?.sandboxes, seatGates, sandboxLanding, swarm,
+    snapshotCapture, snapshotRepo, restoreOrchestrator, seatSandboxes: opts?.sandboxes, seatGates, sandboxLanding, swarm, cockpit,
+    cockpitPagePath: opts?.cockpitPagePath, terminalBearerToken: opts?.terminalBearerToken,
     rigSpecExporter, rigSpecPreflight, rigInstantiator,
     packageRepo, installRepo, installEngine, installVerifier,
     bootstrapOrchestrator, bootstrapRepo,
@@ -460,6 +468,6 @@ export function createTestApp(
     podInstantiator, podBundleSourceResolver, db, tmuxAdapter: tmux,
     agentActivityStore,
     startupOrchestrator,
-    seatGates, sandboxLanding, swarm,
+    seatGates, sandboxLanding, swarm, cockpit,
   };
 }

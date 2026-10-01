@@ -106,6 +106,41 @@ describe("RuntimeVerifier", () => {
     expect(result.runtime).toBe("codex");
   });
 
+  it("gemini --version succeeds -> verified under the name gemini", async () => {
+    const exec = createMockExec({ "gemini --version": "0.62.0" });
+    const verifier = new RuntimeVerifier({ exec, db });
+
+    const result = await verifier.verifyGemini();
+
+    expect(result).toMatchObject({ runtime: "gemini", status: "verified", version: "0.62.0", error: null });
+  });
+
+  it("gemini --version fails but --help succeeds -> verified with a null version", async () => {
+    const exec = createMockExec({ "gemini --version": new Error("unknown option"), "gemini --help": "Gemini CLI" });
+
+    const result = await new RuntimeVerifier({ exec, db }).verifyGemini();
+
+    expect(result).toMatchObject({ runtime: "gemini", status: "verified", version: null });
+  });
+
+  it("reports gemini as not found when neither command runs", async () => {
+    const result = await new RuntimeVerifier({ exec: createMockExec({}), db }).verifyGemini();
+
+    expect(result).toMatchObject({ runtime: "gemini", status: "not_found", error: "gemini not found" });
+  });
+
+  it("verifyAll knows gemini and persists it, while a misspelled runtime is still unknown", async () => {
+    const exec = createMockExec({ "gemini --version": "0.62.0" });
+    const verifier = new RuntimeVerifier({ exec, db });
+
+    const [known, typo] = await verifier.verifyAll(["gemini", "gemni"]);
+
+    expect(known).toMatchObject({ runtime: "gemini", status: "verified" });
+    expect(typo).toMatchObject({ runtime: "gemni", status: "not_found", error: "unknown runtime: gemni" });
+    const rows = db.prepare("SELECT runtime, status FROM runtime_verifications ORDER BY runtime").all();
+    expect(rows).toEqual([{ runtime: "gemini", status: "verified" }, { runtime: "gemni", status: "not_found" }]);
+  });
+
   // T7: verifyTmux auto-persists to DB
   it("verification auto-persists to runtime_verifications table", async () => {
     const exec = createMockExec({ "tmux -V": "tmux 3.4" });

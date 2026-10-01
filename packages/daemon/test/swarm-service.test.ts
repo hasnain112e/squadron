@@ -123,6 +123,29 @@ describe("SwarmService", { timeout: 60_000 }, () => {
       expect(RigSpecSchema.validate(RigSpecCodec.parse(plan.specYaml)).errors).toEqual([]);
     });
 
+    it("runs a whole squad on Gemini, or a mix: one default runtime, and a different one for the lanes that name it", async () => {
+      const allGemini = await service.plan(request({ runtime: "gemini" }));
+      expect(allGemini.runtime).toBe("gemini");
+      expect(allGemini.lanes.map((lane) => lane.runtime)).toEqual(["gemini", "gemini", "gemini"]);
+
+      const mixed = await service.plan(request({ runtimes: { frontend: "gemini", qa: "codex" } }));
+      const runtimeOfEach = (lanes: Array<{ lane: string; runtime: string }>) => Object.fromEntries(lanes.map((lane) => [lane.lane, lane.runtime]));
+      expect(mixed.runtime).toBe("claude-code");
+      expect(runtimeOfEach(mixed.lanes)).toEqual({ backend: "claude-code", frontend: "gemini", qa: "codex" });
+
+      // What gets launched is the rig spec, so each seat's runtime has to be in it, and the real schema has to accept it.
+      const parsed = RigSpecCodec.parse(mixed.specYaml);
+      expect(RigSpecSchema.validate(parsed).errors).toEqual([]);
+      const members = RigSpecSchema.normalize(parsed).pods[0]!.members;
+      expect(Object.fromEntries(members.map((member) => [member.id, member.runtime]))).toEqual({ backend: "claude-code", frontend: "gemini", qa: "codex" });
+    });
+
+    it("lets the default runtime be Gemini with one lane on Claude", async () => {
+      const plan = await service.plan(request({ runtime: "gemini", runtimes: { backend: "claude-code" } }));
+
+      expect(plan.lanes.map((lane) => [lane.lane, lane.runtime])).toEqual([["backend", "claude-code"], ["frontend", "gemini"], ["qa", "gemini"]]);
+    });
+
     it("turns setup off when asked", async () => {
       const plan = await service.plan(request({ noSetup: true }));
 
@@ -233,8 +256,14 @@ describe("SwarmService", { timeout: 60_000 }, () => {
     });
 
     it("a runtime or a rig name that cannot be used", async () => {
-      await refuses({ runtime: "gpt" }, "invalid", /runtime must be one of claude-code, codex/);
+      await refuses({ runtime: "gpt" }, "invalid", /runtime must be one of claude-code, codex, gemini\./);
       await refuses({ name: "Bad Name!" }, "invalid", /rig name "Bad Name!" cannot be used/);
+    });
+
+    it("a runtime for a lane that is not in the squad, or one that does not exist", async () => {
+      await refuses({ runtimes: { devops: "gemini" } }, "invalid", /runtimes names the lane "devops", which is not in this squad \(backend, frontend, qa\)/);
+      await refuses({ lanes: ["backend"], runtimes: { qa: "gemini" } }, "invalid", /which is not in this squad \(backend\)/);
+      await refuses({ runtimes: { qa: "gpt" } }, "invalid", /The runtime for qa must be one of claude-code, codex, gemini\./);
     });
 
     it("a directory that is not in a git repository, and a repository with no commits", async () => {
@@ -286,6 +315,10 @@ describe("parseSwarmRequest", () => {
       mode: "launch",
       lanes: ["qa"],
     });
+    expect(parseSwarmRequest({ ...good, runtime: "claude-code", runtimes: { frontend: "gemini" } })).toMatchObject({
+      runtime: "claude-code",
+      runtimes: { frontend: "gemini" },
+    });
   });
 
   it.each([
@@ -299,6 +332,9 @@ describe("parseSwarmRequest", () => {
     ["lanes that are not strings", { ...good, lanes: [1] }, /lanes must be a list of strings/],
     ["a gate that is a string", { ...good, gate: "npm test" }, /gate must be a list of strings/],
     ["a noSetup that is not a boolean", { ...good, noSetup: "yes" }, /noSetup must be true or false/],
+    ["runtimes that is a list", { ...good, runtimes: ["gemini"] }, /runtimes must map a lane to a runtime/],
+    ["runtimes that is null", { ...good, runtimes: null }, /runtimes must map a lane to a runtime/],
+    ["a runtime in runtimes that is not text", { ...good, runtimes: { qa: 3 } }, /runtimes must map a lane to a runtime/],
   ])("rejects %s", (_label, body, message) => {
     expect(() => parseSwarmRequest(body)).toThrow(message);
     try {

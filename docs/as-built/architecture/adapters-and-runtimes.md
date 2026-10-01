@@ -140,8 +140,35 @@ All three live under `packages/daemon/src/adapters/` and implement
   notes fork-unsupported adapters refuse with a runtime-mismatch error,
   `runtime-adapter.ts:113–115`.)
 
-These three are constructed by `createDaemon` step 4 (`startup.ts`; see
-`daemon-core.md` §4 "Startup sequence").
+### GeminiRuntimeAdapter (`gemini-runtime-adapter.ts`, added by Squadron)
+
+OpenRig has no Gemini adapter, so this subsection is not part of the
+source-verified text above. It describes Squadron's
+`packages/daemon/src/adapters/gemini-runtime-adapter.ts`. What an operator
+needs, and what a Gemini seat does not do yet, is in
+[Gemini seats](../../reference/rig-spec.md#gemini-seats).
+
+- `readonly runtime = "gemini"`.
+- **Projects** skills to `<cwd>/.agents/skills/<name>/` and managed-block
+  guidance to `<cwd>/GEMINI.md`. The per-seat `rig-role` block, subagents,
+  plugins and runtime resources are skipped, and `project` reports them as
+  skipped, not failed.
+- **Launches** `GEMINI_CLI_TRUST_WORKSPACE=true gemini --approval-mode
+  <auto_edit|yolo> [-m <model>]` in the bound tmux session
+  (`geminiPostureArg` in `yolo-mode.ts` picks the mode). A `resumeToken` or a
+  `forkSource` is refused with `recovery: "retry_fresh"`, because no Gemini
+  session id is recorded.
+- **Readiness** (`checkReady`) captures the rendered screen and the pane
+  command and reads them with `assessGeminiScreen`
+  (`domain/gemini-screen.ts`), in the vocabulary of §3: a shell prompt is
+  `failed` / `returned_to_shell`, a sign-in screen `attention_required` /
+  `login_required`, a folder-trust dialog `inconclusive` / `trust_gate`,
+  Gemini's input box `resumed` / `active_runtime`, anything else
+  `inconclusive` / `awaiting_runtime`. The adapter is ready only on `resumed`.
+
+These are constructed by `createDaemon` step 4 (`startup.ts`; see
+`daemon-core.md` §4 "Startup sequence"). Squadron's fourth, the Gemini
+adapter, is registered there beside them.
 
 ## 3. Resume honesty
 

@@ -975,7 +975,7 @@ Notes:
 
 ### `rig swarm`
 
-Usage: `rig swarm <prompt> [--launch | --write] [--lanes <lanes>] [--runtime <runtime>] [--gate <command>] [--setup <command> | --no-setup] [--name <name>] [--json]`
+Usage: `rig swarm <prompt> [--launch | --write] [--lanes <lanes>] [--runtime <runtimes>] [--gate <command>] [--setup <command> | --no-setup] [--name <name>] [--json]`
 
 Notes:
 - Plans a squad for the prompt and prints the plan. `squad swarm` is the same command. The daemon does the planning, so it must be running, and the command must be run from a directory inside a git repository that has at least one commit.
@@ -983,9 +983,20 @@ Notes:
 - The lanes are a fixed template, not an agent's reading of the prompt: `backend`, `frontend` and `qa`, as one pod `swarm`, so the seats are `swarm.backend`, `swarm.frontend` and `swarm.qa`. `--lanes backend,qa` picks a subset, and each seat's message only mentions the teammates that exist. QA is told to write tests from the prompt before the code exists.
 - Every seat has `isolation: worktree`, the `setup` and the `gate`, and its message as a `send_text` startup action. The rig is named from the prompt (lowercase, `-` for anything else, at most 40 characters) unless `--name` is given, and `up` refuses a name that is already running.
 - The gate and setup come from the project, in the directory the command is run in: `package.json` with a `test` script (`npm test` and `npm ci`, `pnpm` or `yarn` when their lockfile is present; a bun project is not detected), pytest, `cargo test` or `go test ./...`. If none is found the command stops and asks for `--gate`. `--gate` and `--setup` take command text, split into arguments like a shell would for words and quotes but run without a shell. `--no-setup` runs no setup.
-- `--runtime` is `claude-code` (the default) or `codex`.
+- `--runtime` is `claude-code` (the default), `codex` or `gemini`, for every lane. To mix runtimes in one squad give a runtime per lane as `lane=runtime`, for example `--runtime backend=claude-code,frontend=gemini`. A bare runtime in the same list sets the lanes you did not name: `--runtime gemini,backend=claude-code` puts the backend on Claude Code and the others on Gemini. The command refuses a lane that is not in the squad, a lane named twice, two bare runtimes, and any runtime other than those three. When the runtimes differ, the plan says so and names the runtime of each lane. See [Gemini seats](../reference/rig-spec.md#gemini-seats) for what a Gemini seat needs. The daemon serves a page that shows a Claude Code seat and a Gemini seat side by side: [dual cockpit](#dual-cockpit).
 - A seat is told to work only in its own worktree, commit early, stage files by name, run `squad gate run` when its work is committed, fix and rerun if it fails, and not merge, rebase or push. Landing stays with the person: `rig land <rig> --dry-run`, then `rig land <rig>`.
 - `--launch` appends `.openrig/` and `.claude/settings.local.json` to the repository's `.git/info/exclude` (once), because starting a seat writes those files into its worktree and a `git add -A` would commit them. That file covers every worktree of the repository and is never committed.
+
+### Dual cockpit
+
+The daemon serves a page that shows one Claude Code seat and one Gemini seat side by side, at `http://127.0.0.1:7433/cockpit` (the daemon's host and port). It is the file `assets/dual-cockpit.html` of the repository, so the daemon serves it only where that file is: a daemon run from a source checkout, as the README's install does. Elsewhere `/cockpit` answers 404 and says so.
+
+- **Left and right.** The left deck is the live terminal of the rig's Claude Code seat, the right deck the live terminal of its Gemini seat, each with its branch and worktree. A rig with two seats of one runtime gets a picker on that deck. A rig with no seat of a runtime shows an empty deck that says how to start one.
+- **Bottom bar.** The latest test gate of each seat, with the commit it tested, and Landing: what `rig land <rig> --dry-run` says, one chip per lane. **Dry run** asks the daemon for the same judgement and changes nothing. **Land** asks you to confirm, then runs `rig land <rig>`. Your own branches are not changed, as with the command.
+- **Which rig.** The rig picker lists the daemon's rigs. `?rig=<name>` chooses one, and the page remembers the choice in the browser. `?left=<seat>` and `?right=<seat>` choose the seat on a deck.
+- **Where the data comes from.** `GET /api/cockpit/<rig>` answers the seats (agent seats only), their runtimes, sessions, branches and latest gates, and the landing dry run, in one read-only request every four seconds. Each deck reads the seat's `GET /api/sessions/<session>/preview` every 1.5 seconds. When the daemon has a terminal bearer token, `/cockpit` hands it to the page. A rig that cannot be judged for landing, because none of its seats is isolated, keeps the rest of the view and shows why.
+- **Simulation.** Opened as a file, or with `?demo=1`, the page plays a scripted squad, marks itself **Simulation**, disables Dry run and Land, and sends no request. `?t=<seconds>&paused=1` freezes a moment of it.
+- **Limits.** One Claude Code seat and one Gemini seat at a time; Codex seats are not shown. The page is tested in jsdom against a stand-in daemon, and has not been run against a live Gemini CLI.
 
 ## Identity, Communication, and Context
 

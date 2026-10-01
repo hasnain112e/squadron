@@ -14,7 +14,7 @@ import type { RigSpec } from "./types.js";
 export type SwarmMode = "preview" | "write" | "launch";
 
 const MODES: readonly SwarmMode[] = ["preview", "write", "launch"];
-const RUNTIMES = ["claude-code", "codex"] as const;
+const RUNTIMES = ["claude-code", "codex", "gemini"] as const;
 const MAX_PROMPT_LENGTH = 8000;
 
 /** Files OpenRig writes into each seat's worktree. A seat's `git add -A` would commit them, so launching hides them. */
@@ -43,7 +43,10 @@ export interface SwarmRequest {
   mode?: SwarmMode;
   name?: string;
   lanes?: string[];
+  /** The runtime of every lane that has no entry in `runtimes`. Default claude-code. */
   runtime?: string;
+  /** A runtime for single lanes, for example { frontend: "gemini" }: how Claude and Gemini seats share a squad. */
+  runtimes?: Record<string, string>;
   gate?: string[];
   setup?: string[];
   noSetup?: boolean;
@@ -53,6 +56,8 @@ export interface SwarmLanePlan {
   lane: SwarmLaneId;
   /** The logical id of the seat, for example swarm.backend. */
   seat: string;
+  /** What this seat runs: its entry in the request's `runtimes`, else the request's `runtime`. */
+  runtime: string;
   session: string;
   branch: string;
   summary: string;
@@ -66,6 +71,7 @@ export interface SwarmPlan {
   repo: string;
   /** Where the seats work: the directory the command was run in, inside their worktrees. */
   cwd: string;
+  /** The default runtime. A lane can differ: see lanes[].runtime. */
   runtime: string;
   gate: string[];
   gateBasis: string;
@@ -106,6 +112,10 @@ export function parseSwarmRequest(body: unknown): SwarmRequest {
   const mode = text("mode", false);
   if (mode !== undefined && !MODES.includes(mode as SwarmMode)) throw invalid(`mode must be one of ${MODES.join(", ")}.`);
   if (b["noSetup"] !== undefined && typeof b["noSetup"] !== "boolean") throw invalid("noSetup must be true or false.");
+  const runtimes = b["runtimes"];
+  if (runtimes !== undefined && (typeof runtimes !== "object" || runtimes === null || Array.isArray(runtimes) || Object.values(runtimes).some((value) => typeof value !== "string"))) {
+    throw invalid('runtimes must map a lane to a runtime, for example {"frontend": "gemini"}.');
+  }
   return {
     prompt: text("prompt", true)!,
     cwd,
@@ -113,6 +123,7 @@ export function parseSwarmRequest(body: unknown): SwarmRequest {
     name: text("name", false),
     lanes: list("lanes"),
     runtime: text("runtime", false),
+    runtimes: runtimes as Record<string, string> | undefined,
     gate: list("gate"),
     setup: list("setup"),
     noSetup: b["noSetup"] as boolean | undefined,
@@ -148,7 +159,15 @@ export class SwarmService {
 
     const lanes = this.lanesFor(request.lanes);
     const runtime = request.runtime ?? "claude-code";
-    if (!(RUNTIMES as readonly string[]).includes(runtime)) throw invalid(`runtime must be one of ${RUNTIMES.join(", ")}.`);
+    const mustBeRuntime = (value: string, what: string) => {
+      if (!(RUNTIMES as readonly string[]).includes(value)) throw invalid(`${what} must be one of ${RUNTIMES.join(", ")}.`);
+    };
+    mustBeRuntime(runtime, "runtime");
+    const overrides = request.runtimes ?? {};
+    for (const [lane, laneRuntime] of Object.entries(overrides)) {
+      if (!(lanes as string[]).includes(lane)) throw invalid(`runtimes names the lane "${lane}", which is not in this squad (${lanes.join(", ")}).`);
+      mustBeRuntime(laneRuntime, `The runtime for ${lane}`);
+    }
     const rig = request.name ?? rigNameFor(prompt);
     const nameErrors = lanes.flatMap((lane) => validateSessionComponents("swarm", lane, rig));
     if (nameErrors.length > 0) throw invalid(`The rig name "${rig}" cannot be used: ${[...new Set(nameErrors)].join("; ")}.`);
@@ -172,6 +191,7 @@ export class SwarmService {
     const lanePlans: SwarmLanePlan[] = sessions.map(({ lane, session }) => ({
       lane,
       seat: `swarm.${lane}`,
+      runtime: overrides[lane] ?? runtime,
       session,
       branch: `squad/${segment(rig)}/${segment(`swarm.${lane}`)}`,
       summary: LANE_SUMMARIES[lane],
@@ -190,7 +210,7 @@ export class SwarmService {
             id: plan.lane,
             agentRef: "local:agents/lane",
             profile: "default",
-            runtime,
+            runtime: plan.runtime,
             cwd: real,
             isolation: "worktree" as const,
             ...(setup ? { setup } : {}),

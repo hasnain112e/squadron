@@ -140,6 +140,17 @@ describe("RigSpecPreflight", () => {
     expect(codexCall![0]).toBe("codex --version");
   });
 
+  it("gemini probes 'gemini --version' (exact command)", async () => {
+    const exec = vi.fn<ExecFn>().mockResolvedValue("");
+    const pf = createPreflight({ exec });
+    await pf.check(validSpec({
+      nodes: [{ id: "worker", runtime: "gemini", cwd: "/" }],
+    }));
+    const geminiCall = exec.mock.calls.find((c: unknown[]) => (c[0] as string).includes("gemini"));
+    expect(geminiCall).toBeDefined();
+    expect(geminiCall![0]).toBe("gemini --version");
+  });
+
   it("runtime not available -> error", async () => {
     const exec = vi.fn<ExecFn>().mockRejectedValue(new Error("not found"));
     const pf = createPreflight({ exec });
@@ -448,6 +459,32 @@ profiles:
     const result = await rigPreflight({ rigSpecYaml: rigYaml, rigRoot: RIG_ROOT, fsOps: mockFs(files) });
     expect(result.ready, `preflight must accept runtime: stub; errors: ${JSON.stringify(result.errors)}`).toBe(true);
     expect(result.errors).toEqual([]);
+  });
+
+  it("accepts a modern pod member with runtime: gemini, and still rejects a misspelling of it", async () => {
+    const files: Record<string, string> = {
+      [`${RIG_ROOT}/agents/impl/agent.yaml`]: validAgentYaml("impl"),
+    };
+    const specWith = (runtime: string) => makeRigYaml({
+      pods: [{
+        id: "dev", label: "Dev",
+        members: [{ id: "impl", agentRef: "local:agents/impl", profile: "default", runtime, cwd: "." }],
+        edges: [],
+      }],
+    });
+
+    // On Windows RIG_ROOT resolves to C:\project\..., while the fixture keys are POSIX paths.
+    const posix = (p: string) => p.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
+    const fixtures = mockFs(files);
+    const fsOps = { readFile: (p: string) => fixtures.readFile(posix(p)), exists: (p: string) => fixtures.exists(posix(p)) };
+
+    const accepted = await rigPreflight({ rigSpecYaml: specWith("gemini"), rigRoot: RIG_ROOT, fsOps });
+    expect(accepted.ready, `preflight must accept runtime: gemini; errors: ${JSON.stringify(accepted.errors)}`).toBe(true);
+    expect(accepted.errors).toEqual([]);
+
+    const typo = await rigPreflight({ rigSpecYaml: specWith("gemni"), rigRoot: RIG_ROOT, fsOps });
+    expect(typo.ready).toBe(false);
+    expect(typo.errors.some((e) => e.includes('unsupported runtime "gemni"'))).toBe(true);
   });
 
   // T7: missing cwd
