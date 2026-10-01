@@ -23,7 +23,8 @@ export interface ProbeShellReadyInput {
   paneContent: string | null;
 }
 
-const SHELL_COMMANDS = new Set(["bash", "fish", "nu", "sh", "tmux", "zsh"]);
+/** Foreground commands that mean a pane is back at a shell prompt, so no harness is running in it. */
+export const SHELL_COMMANDS = new Set(["bash", "fish", "nu", "sh", "tmux", "zsh"]);
 
 export function buildNativeResumeCommand(
   runtime: string | null,

@@ -81,6 +81,14 @@ export class RuntimeVerifier {
     return result;
   }
 
+  /** Verify the Gemini CLI: `gemini --version`, fallback to `gemini --help`. Sign-in is the person's and is
+   *  met at launch (login_required), not here. */
+  async verifyGemini(): Promise<RuntimeVerification> {
+    const result = await this.verifyVersionOrHelp("gemini", "gemini");
+    this.persist(result);
+    return result;
+  }
+
   /** OPR.0.4.6.PI1 FR-1 — Verify Pi: `pi --version` (fallback `pi --help`)
    *  plus the Node engine floor Pi requires (>= 22.19.0). Provider/model
    *  resolvability is member-scoped and verified at launch, not here. */
@@ -109,7 +117,7 @@ export class RuntimeVerifier {
 
   /**
    * Verify multiple runtimes. Returns results in input order.
-   * @param runtimes - canonical runtime names: 'tmux', 'cmux', 'claude-code', 'codex', 'pi'
+   * @param runtimes - canonical runtime names: 'tmux', 'cmux', 'claude-code', 'codex', 'gemini', 'pi'
    */
   async verifyAll(runtimes: string[]): Promise<RuntimeVerification[]> {
     const results: RuntimeVerification[] = [];
@@ -119,6 +127,7 @@ export class RuntimeVerifier {
         case "cmux": results.push(await this.verifyCmux()); break;
         case "claude-code": results.push(await this.verifyClaude()); break;
         case "codex": results.push(await this.verifyCodex()); break;
+        case "gemini": results.push(await this.verifyGemini()); break;
         case "pi": results.push(await this.verifyPi()); break;
         default: {
           const v = this.buildVerification(runtime, "not_found", null, null, `unknown runtime: ${runtime}`);

@@ -8,6 +8,8 @@
 //             explicit -s workspace-write flag, NOT a harness default)
 //   - Pi:     --approve                       (full RESOURCE TRUST — Pi's
 //             --approve/--no-approve govern RESOURCE TRUST, not a permission policy)
+//   - Gemini: --approval-mode yolo            (auto-approve every tool; OFF floor = --approval-mode
+//             auto_edit, which approves edits and still asks before other tools)
 // When OFF (the default), seats boot with the usability floor, unchanged. The YOLO path writes ZERO
 // config files — it only selects a launch flag. Opt-in via the OPENRIG_YOLO env setting. (The
 // zero-permission-config-write property concerns Claude/Codex permission policy; Pi is resource trust.)
@@ -64,6 +66,18 @@ export function codexPostureArg(
   if (resolvedPosture === "full_bypass") return " -s danger-full-access -a never";
   if (yoloEnabled(env, resolvedPosture)) return " -s danger-full-access";
   return profileArg ? profileArg : " -s workspace-write";
+}
+
+/**
+ * Gemini CLI launch posture segment (leading space included): the floor `--approval-mode auto_edit`
+ * (file edits are approved, anything else asks), or `--approval-mode yolo` for global YOLO or a seat
+ * whose resolved policy is full_bypass. A resolved `floor` keeps the floor even under global YOLO.
+ */
+export function geminiPostureArg(
+  env: NodeJS.ProcessEnv = process.env,
+  resolvedPosture?: ResolvedLaunchPosture,
+): string {
+  return ` --approval-mode ${yoloEnabled(env, resolvedPosture) ? "yolo" : "auto_edit"}`;
 }
 
 /** Pi RESOURCE TRUST (Pi's --approve/--no-approve govern resource trust, NOT a permission policy):
