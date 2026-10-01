@@ -17,7 +17,8 @@ Squadron's goal is to run parallel agent squads in isolated Git worktrees, check
 | `squad` command, with `rig` kept as an alias | Available |
 | CLI builds and installs natively on Windows | Available |
 | Multi-agent rigs, queues, workflows, snapshot and restore (inherited from OpenRig, needs tmux) | Available |
-| `squad swarm <prompt>` | Plans a backend, frontend and QA squad and shows the plan; `--launch` starts it, each seat in its own worktree with a test gate. Tested end to end with real git and a stub runtime, and not yet run against live Claude Code or Codex seats |
+| `squad swarm <prompt>` | Plans a backend, frontend and QA squad and shows the plan; `--launch` starts it, each seat in its own worktree with a test gate. Tested end to end with real git and a stub runtime, and not yet run against live Claude Code, Codex or Gemini seats |
+| Gemini CLI seats, and a cockpit that shows a Claude seat and a Gemini seat side by side | Available: `runtime: gemini` on a member of a rig spec, `squad swarm --runtime backend=claude-code,frontend=gemini`, and the daemon's `/cockpit` page with both seats' terminals, their test gates and `squad land`. Tested with stand-ins for tmux and the daemon, not yet against a live Gemini CLI |
 | One Git worktree per agent | Available: set `isolation: worktree` on a member of a rig spec, or use `squad swarm`, which does it for every seat |
 | Test gate before landing | Available: `gate:` on a member, `squad gate run`, and `squad land`, which merges gated seats onto an integration branch and gates the result. `squad land --dry-run` shows what would land first. `squad swarm` sets the gate up for you |
 | Per-seat credential profiles | Planned |
@@ -48,7 +49,7 @@ flowchart LR
 
 ## Quickstart
 
-Requires Node.js 22 or 24 and git. Running agents also needs tmux and a logged-in Claude Code or Codex, on macOS or Linux.
+Requires Node.js 22 or 24 and git. Running agents also needs tmux and a logged-in Claude Code, Codex or Gemini CLI, on macOS or Linux.
 
 ```bash
 git clone https://github.com/hasnain112e/squadron.git
@@ -88,9 +89,9 @@ Preview only: nothing was written and nothing was started.
 Add --launch to start the squad, or --write to only write its rig spec.
 ```
 
-The gate and the install step are found from your project: `package.json` with a `test` script (npm, pnpm or yarn, by lockfile), pytest, Cargo or Go. If none is found, `squad swarm` stops and asks for `--gate "<command>"`, because `squad land` refuses lanes that have no gate. `--setup`, `--no-setup`, `--lanes backend,qa`, `--runtime codex` and `--name` change the plan.
+The gate and the install step are found from your project: `package.json` with a `test` script (npm, pnpm or yarn, by lockfile), pytest, Cargo or Go. If none is found, `squad swarm` stops and asks for `--gate "<command>"`, because `squad land` refuses lanes that have no gate. `--setup`, `--no-setup`, `--lanes backend,qa`, `--runtime codex` (or `gemini`, or one runtime per lane) and `--name` change the plan.
 
-To start the squad, add `--launch` (macOS or Linux, with tmux and a logged-in Claude Code or Codex):
+To start the squad, add `--launch` (macOS or Linux, with tmux and a logged-in Claude Code, Codex or Gemini CLI):
 
 ```bash
 squad swarm "Build Auth API" --launch   # writes the rig spec under $OPENRIG_HOME/swarms/ (~/.openrig/swarms/), then runs `squad up` on it
@@ -130,6 +131,25 @@ squad land <rig> --reset     # throw the integration branch away; the seats' bra
 
 The [guided first-use path](docs/reference/getting-started.md) walks through it. It is written for `rig`; every command works the same with `squad`. Read [what Squadron changes on your machine](#what-openrig-changes-on-your-machine) before you launch a rig.
 
+## Claude and Gemini side by side
+
+Gemini CLI is a third runtime next to Claude Code and Codex. Put it on a member of a rig spec with `runtime: gemini`, or mix runtimes in one squad by naming a runtime per lane:
+
+```bash
+squad swarm "Build Auth API" --runtime backend=claude-code,frontend=gemini --launch
+```
+
+The plan then says it is on a mix of runtimes and names the runtime of each lane. `--runtime gemini` alone puts every lane on Gemini. A Gemini seat needs the `gemini` command on the daemon's `PATH` and a signed-in Gemini CLI. It cannot be resumed or forked yet; [Gemini seats](docs/reference/rig-spec.md#gemini-seats) lists what it needs and what it does not do.
+
+With the daemon running (`squad start`), open its cockpit page, `http://127.0.0.1:7433/cockpit` at the default address:
+
+- The left deck is the live terminal of the rig's Claude Code seat, and the right deck is the Gemini seat's, each with its branch and worktree.
+- The bottom bar shows each seat's latest test gate and what `squad land` would do, with **Dry run** and **Land** buttons. Land asks you to confirm first.
+
+The page only reads the daemon (`GET /api/cockpit/<rig>` and each seat's terminal preview), except when you press Land. The daemon serves it from [assets/dual-cockpit.html](assets/dual-cockpit.html), so it is available when the daemon runs from a source checkout, as in the Quickstart. Opened as a file, the same page plays a scripted simulation and says so. See [dual cockpit](docs/as-built/cli-reference.md#dual-cockpit).
+
+The Gemini runtime is tested against a stand-in for tmux and the page against a stand-in daemon. Neither has been run against a live Gemini CLI.
+
 ## Concept demo
 
 [assets/swarm-visualizer.html](assets/swarm-visualizer.html) is a scripted animation of the target workflow: three agents in separate worktrees, a test gate that blocks and then passes, and a landing on an integration branch. It is a simulation, not live output.
@@ -143,7 +163,7 @@ Open `squadron-visualizer.html` in a browser. Add `?t=20&paused=1` to its addres
 
 ## Built on OpenRig
 
-Squadron is a fork of [OpenRig](https://github.com/mvschwarz/openrig) v0.6.1, licensed under Apache 2.0. The daemon, runtime adapters, terminal UI, queues, workflows and the tmux control layer come from OpenRig, and this repository keeps its full history and authorship. What Squadron adds so far is the `squad` command and `rig` alias, a native Windows build of the CLI, per-seat git worktrees (`isolation: worktree`), a per-seat test gate with `squad land`, and `squad swarm`, which plans a squad from a prompt and launches it with those pieces. Credential profiles and a test of `squad swarm` against live agents are the next milestones.
+Squadron is a fork of [OpenRig](https://github.com/mvschwarz/openrig) v0.6.1, licensed under Apache 2.0. The daemon, runtime adapters, terminal UI, queues, workflows and the tmux control layer come from OpenRig, and this repository keeps its full history and authorship. What Squadron adds so far is the `squad` command and `rig` alias, a native Windows build of the CLI, per-seat git worktrees (`isolation: worktree`), a per-seat test gate with `squad land`, `squad swarm`, which plans a squad from a prompt and launches it with those pieces, and a Gemini CLI runtime with a cockpit page that shows a Claude seat and a Gemini seat side by side. Credential profiles and a test of `squad swarm` and the Gemini runtime against live agents are the next milestones.
 
 [NOTICE](NOTICE) records the attribution. Squadron is not affiliated with or endorsed by the OpenRig project. For the inherited features in depth, see the [OpenRig README](https://github.com/mvschwarz/openrig#readme).
 
