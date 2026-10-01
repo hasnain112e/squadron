@@ -87,6 +87,27 @@ describe("/api/swarm", { timeout: 30_000 }, () => {
     });
   });
 
+  it("plans a squad with Claude and Gemini seats side by side, each lane carrying its runtime into the rig spec", async () => {
+    const app = boot();
+
+    const res = await post(app, { prompt: "Build Auth API", cwd: repo, runtimes: { frontend: "gemini" } });
+
+    expect(res.status).toBe(200);
+    const { plan } = (await res.json()) as { plan: { runtime: string; specYaml: string; lanes: Array<{ lane: string; runtime: string }> } };
+    expect(plan.runtime).toBe("claude-code");
+    expect(plan.lanes.map((lane) => [lane.lane, lane.runtime])).toEqual([["backend", "claude-code"], ["frontend", "gemini"], ["qa", "claude-code"]]);
+    expect(plan.specYaml.match(/runtime: gemini/g)).toHaveLength(1);
+    expect(plan.specYaml.match(/runtime: claude-code/g)).toHaveLength(2);
+  });
+
+  it("runs the whole squad on Gemini when asked", async () => {
+    const res = await post(boot(), { prompt: "Build Auth API", cwd: repo, runtime: "gemini" });
+
+    const { plan } = (await res.json()) as { plan: { runtime: string; lanes: Array<{ runtime: string }> } };
+    expect(res.status).toBe(200);
+    expect([plan.runtime, ...plan.lanes.map((lane) => lane.runtime)]).toEqual(["gemini", "gemini", "gemini", "gemini"]);
+  });
+
   it.each<[string, (cwd: string) => unknown]>([
     ["a body that is not JSON", () => "{nope"],
     ["a body that is not an object", () => "[1]"],
@@ -99,6 +120,10 @@ describe("/api/swarm", { timeout: 30_000 }, () => {
     ["a lane that does not exist", (cwd) => ({ prompt: "x", cwd, lanes: ["design"] })],
     ["a gate that is not a list of text", (cwd) => ({ prompt: "x", cwd, gate: [1] })],
     ["noSetup that is not true or false", (cwd) => ({ prompt: "x", cwd, noSetup: "yes" })],
+    ["a runtime that does not exist", (cwd) => ({ prompt: "x", cwd, runtime: "gpt" })],
+    ["a lane runtime that does not exist", (cwd) => ({ prompt: "x", cwd, runtimes: { qa: "gpt" } })],
+    ["a lane runtime for a lane outside the squad", (cwd) => ({ prompt: "x", cwd, lanes: ["backend"], runtimes: { qa: "gemini" } })],
+    ["runtimes that is not an object", (cwd) => ({ prompt: "x", cwd, runtimes: "gemini" })],
   ])("answers 400 for %s", async (_name, body) => {
     const res = await post(boot(), body(repo));
 

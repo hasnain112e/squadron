@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProgram } from "../src/index.js";
-import { formatLaunched, formatSwarmPlan, parseCommandText, swarmCommand, type SwarmPlanView } from "../src/commands/swarm.js";
+import { formatLaunched, formatSwarmPlan, parseCommandText, parseRuntimeOption, swarmCommand, type SwarmPlanView } from "../src/commands/swarm.js";
 import { startStubDaemon, useCommandRunner, type StubDaemon } from "./helpers/stub-daemon.js";
 
-const lane = (name: string, summary: string) => ({
+const lane = (name: string, summary: string, runtime = "claude-code") => ({
   lane: name,
   seat: `swarm.${name}`,
+  runtime,
   session: `swarm-${name}@build-auth-api`,
   branch: `squad/build-auth-api/swarm.${name}`,
   summary,
@@ -64,6 +65,40 @@ describe("parseCommandText", () => {
   });
 });
 
+describe("parseRuntimeOption", () => {
+  it("takes one runtime for every lane", () => {
+    expect(parseRuntimeOption("gemini")).toEqual({ runtime: "gemini" });
+  });
+
+  it("takes a runtime for single lanes, which is how Claude and Gemini seats share a squad", () => {
+    expect(parseRuntimeOption("backend=claude-code,frontend=gemini")).toEqual({ runtimes: { backend: "claude-code", frontend: "gemini" } });
+  });
+
+  it("takes a default and the lanes that differ from it", () => {
+    expect(parseRuntimeOption("claude-code,frontend=gemini")).toEqual({ runtime: "claude-code", runtimes: { frontend: "gemini" } });
+    expect(parseRuntimeOption("frontend=gemini,claude-code")).toEqual({ runtime: "claude-code", runtimes: { frontend: "gemini" } });
+  });
+
+  it("ignores spaces around the items", () => {
+    expect(parseRuntimeOption(" frontend = gemini , qa=codex ")).toEqual({ runtimes: { frontend: "gemini", qa: "codex" } });
+  });
+
+  it.each([
+    ["an empty item", "backend=claude-code,,qa=codex", /empty item/],
+    ["a trailing comma", "gemini,", /empty item/],
+    ["two defaults", "claude-code,gemini", /two default runtimes \(claude-code and gemini\)/],
+    ["a lane with no runtime", "frontend=", /must look like lane=runtime/],
+    ["a runtime with no lane", "=gemini", /must look like lane=runtime/],
+    ["the same lane twice", "qa=gemini,qa=codex", /names the lane qa twice/],
+  ])("refuses %s", (_label, text, message) => {
+    expect(() => parseRuntimeOption(text)).toThrow(message);
+  });
+
+  it("does not treat a lane named like an object property as already taken", () => {
+    expect(parseRuntimeOption("constructor=gemini")).toEqual({ runtimes: { constructor: "gemini" } });
+  });
+});
+
 describe("formatSwarmPlan", () => {
   it("shows the rig, the gate and setup with where they came from, and each seat's branch", () => {
     const lines = formatSwarmPlan(plan(), "preview").split("\n");
@@ -75,6 +110,30 @@ describe("formatSwarmPlan", () => {
     expect(lines).toContain("  backend   squad/build-auth-api/swarm.backend");
     expect(lines).toContain("            Build the server side");
     expect(lines).toContain("  qa        squad/build-auth-api/swarm.qa");
+  });
+
+  it("names the runtime when every seat has the same one, going by the seats and not by the default", () => {
+    const allGemini = plan({ lanes: [lane("backend", "Build the server side", "gemini"), lane("qa", "Write the tests", "gemini")] });
+
+    const text = formatSwarmPlan(allGemini, "preview");
+
+    expect(text.split("\n")[1]).toBe("Rig build-auth-api on gemini, working in /w/repo");
+    expect(text).not.toContain("Runtimes:");
+  });
+
+  it("lists each seat's runtime when Claude and Gemini seats share the squad", () => {
+    const mixed = plan({ lanes: [lane("backend", "Build the server side"), lane("frontend", "Build the client side", "gemini"), lane("qa", "Write the tests")] });
+
+    const lines = formatSwarmPlan(mixed, "preview").split("\n");
+
+    expect(lines[1]).toBe("Rig build-auth-api on a mix of runtimes, working in /w/repo");
+    expect(lines[2]).toBe("Runtimes: backend claude-code, frontend gemini, qa claude-code");
+  });
+
+  it("falls back to the plan's runtime for a daemon that does not name one per seat", () => {
+    const older = plan({ runtime: "codex", lanes: [{ ...lane("backend", "x"), runtime: undefined as unknown as string }] });
+
+    expect(formatSwarmPlan(older, "preview").split("\n")[1]).toBe("Rig build-auth-api on codex, working in /w/repo");
   });
 
   it("says the lanes are a template, and how to read what the seats are told", () => {
@@ -176,6 +235,30 @@ describe("squad swarm", () => {
     });
     expect(run.out).toContain("Start it with: squad up");
     expect(up).not.toHaveBeenCalled();
+  });
+
+  it("sends one runtime for every seat, or a runtime for single seats, as the daemon expects them", async () => {
+    daemon = await answersWith({ ok: true, plan: plan() });
+
+    await runCommand(daemon.url, "swarm", "Build Auth API", "--runtime", "gemini");
+    await runCommand(daemon.url, "swarm", "Build Auth API", "--runtime", "backend=claude-code,frontend=gemini");
+    await runCommand(daemon.url, "swarm", "Build Auth API", "--runtime", "claude-code,frontend=gemini");
+
+    expect(daemon.requests.map((request) => request.body)).toEqual([
+      { prompt: "Build Auth API", cwd: process.cwd(), mode: "preview", runtime: "gemini" },
+      { prompt: "Build Auth API", cwd: process.cwd(), mode: "preview", runtimes: { backend: "claude-code", frontend: "gemini" } },
+      { prompt: "Build Auth API", cwd: process.cwd(), mode: "preview", runtime: "claude-code", runtimes: { frontend: "gemini" } },
+    ]);
+  });
+
+  it("refuses a --runtime it cannot read, without contacting the daemon", async () => {
+    daemon = await answersWith({});
+
+    const run = await runCommand(daemon.url, "swarm", "x", "--runtime", "claude-code,gemini");
+
+    expect(run.err).toMatch(/two default runtimes/);
+    expect(run.exitCode).toBe(1);
+    expect(daemon.requests).toEqual([]);
   });
 
   it("turns setup off with --no-setup", async () => {

@@ -19,7 +19,7 @@ export interface SwarmPlanView {
   gateBasis: string;
   setup: string[] | null;
   setupBasis: string;
-  lanes: Array<{ lane: string; seat: string; session: string; branch: string; summary: string; brief: string }>;
+  lanes: Array<{ lane: string; seat: string; runtime: string; session: string; branch: string; summary: string; brief: string }>;
   specYaml: string;
   specPath: string;
   written: boolean;
@@ -60,12 +60,41 @@ export function parseCommandText(text: string): string[] {
   return args;
 }
 
+/**
+ * The --runtime value. A runtime alone is for every lane ("gemini"). `lane=runtime` is for one lane
+ * ("backend=claude-code,frontend=gemini"), which is how Claude and Gemini seats share a squad. A runtime
+ * without `=` among those is the default for the lanes that name none ("claude-code,frontend=gemini").
+ * Whether the names are real is the daemon's to say.
+ */
+export function parseRuntimeOption(text: string): { runtime?: string; runtimes?: Record<string, string> } {
+  let runtime: string | undefined;
+  const runtimes: Record<string, string> = {};
+  for (const item of text.split(",").map((part) => part.trim())) {
+    if (!item) throw new Error(`--runtime has an empty item: "${text}"`);
+    const eq = item.indexOf("=");
+    if (eq === -1) {
+      if (runtime !== undefined) throw new Error(`--runtime names two default runtimes (${runtime} and ${item}). Give one, and use lane=runtime for the lanes that differ.`);
+      runtime = item;
+      continue;
+    }
+    const lane = item.slice(0, eq).trim();
+    const value = item.slice(eq + 1).trim();
+    if (!lane || !value) throw new Error(`--runtime item "${item}" must look like lane=runtime, for example frontend=gemini.`);
+    if (Object.prototype.hasOwnProperty.call(runtimes, lane)) throw new Error(`--runtime names the lane ${lane} twice.`);
+    runtimes[lane] = value;
+  }
+  return { ...(runtime === undefined ? {} : { runtime }), ...(Object.keys(runtimes).length === 0 ? {} : { runtimes }) };
+}
+
 /** A plan as text, and what to do next for the mode it was made in. */
 export function formatSwarmPlan(plan: SwarmPlanView, mode: SwarmMode): string {
   const width = Math.max(...plan.lanes.map((lane) => lane.lane.length));
+  const runtimeOf = (lane: SwarmPlanView["lanes"][number]) => lane.runtime ?? plan.runtime;
+  const mixed = new Set(plan.lanes.map(runtimeOf)).size > 1;
   const lines = [
     `Squad for: ${plan.prompt}`,
-    `Rig ${plan.rig} on ${plan.runtime}, working in ${plan.cwd}`,
+    `Rig ${plan.rig} on ${mixed ? "a mix of runtimes" : plan.lanes[0] ? runtimeOf(plan.lanes[0]) : plan.runtime}, working in ${plan.cwd}`,
+    ...(mixed ? [`Runtimes: ${plan.lanes.map((lane) => `${lane.lane} ${runtimeOf(lane)}`).join(", ")}`] : []),
     `Gate:  ${commandLine(plan.gate)} (${plan.gateBasis})`,
     `Setup: ${plan.setup ? commandLine(plan.setup) : "none"} (${plan.setupBasis})`,
     "",
@@ -138,7 +167,7 @@ export function swarmCommand(deps: SwarmDeps = {}): Command {
     .option("--launch", "Start the squad: write its rig spec, then run it with `up`")
     .option("--write", "Write the rig spec under the instance directory without starting it")
     .option("--lanes <lanes>", "The lanes to include, separated by commas: backend, frontend, qa (default: all three)")
-    .option("--runtime <runtime>", "Runtime of every seat: claude-code or codex (default: claude-code)")
+    .option("--runtime <runtimes>", "Runtime of the seats: claude-code, codex or gemini (default: claude-code). One lane at a time: backend=claude-code,frontend=gemini")
     .option("--gate <command>", "The test command that decides whether a seat's work may land (default: found from the project)")
     .option("--setup <command>", "Command run once in each new worktree, such as an install (default: found from the project)")
     .option("--no-setup", "Run no setup command in the worktrees")
@@ -150,9 +179,11 @@ export function swarmCommand(deps: SwarmDeps = {}): Command {
 
       let gate: string[] | undefined;
       let setup: string[] | undefined;
+      let runtimeChoice: ReturnType<typeof parseRuntimeOption> = {};
       try {
         gate = opts.gate === undefined ? undefined : parseCommandText(opts.gate);
         setup = typeof opts.setup === "string" ? parseCommandText(opts.setup) : undefined;
+        runtimeChoice = opts.runtime === undefined ? {} : parseRuntimeOption(opts.runtime);
       } catch (err) {
         return fail(`${(err as Error).message}`);
       }
@@ -168,7 +199,7 @@ export function swarmCommand(deps: SwarmDeps = {}): Command {
             mode,
             ...(opts.name === undefined ? {} : { name: opts.name }),
             ...(lanes === undefined ? {} : { lanes }),
-            ...(opts.runtime === undefined ? {} : { runtime: opts.runtime }),
+            ...runtimeChoice,
             ...(gate === undefined ? {} : { gate }),
             ...(setup === undefined ? {} : { setup }),
             ...(opts.setup === false ? { noSetup: true } : {}),
