@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Squadron cockpit</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30' fill='none' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M3 6 C12 6 13 15 21 15' stroke='%233dd9f5'/%3E%3Cpath d='M3 15 H21' stroke='%23f573d9'/%3E%3Cpath d='M3 24 C12 24 13 15 21 15' stroke='%23ffc45c'/%3E%3Cpath d='M21 15 H28' stroke='%2372f2a9'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --ink: #071022;
+    --deck: #0d1a33;
+    --well: #08132a;
+    --hairline: #24406b;
+    --text: #e8f0ff;
+    --dim: #93a9cf;
+    --claude: #f0a875;
+    --gemini: #8ab4ff;
+    --gemini-2: #b79bff;
+    --pass: #72f2a9;
+    --fail: #ff7a86;
+    --warn: #ffc45c;
+    --off: #3a4f78;
+    --ui: "Bahnschrift", "Segoe UI Variable Display", "Avenir Next Condensed", "Roboto Condensed", system-ui, sans-serif;
+    --code: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ink); }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    color: var(--text);
+    font: 15px/1.5 var(--ui);
+    background:
+      radial-gradient(900px 420px at 8% -10%, rgba(240, 168, 117, .10), transparent 60%),
+      radial-gradient(900px 420px at 94% -10%, rgba(138, 180, 255, .11), transparent 60%),
+      var(--ink);
+  }
+  .page { flex: 1; width: 100%; max-width: 1480px; margin: 0 auto; padding: 0 20px 16px; }
+
+  /* top bar */
+  .top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; padding: 16px 0 14px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand h1 { margin: 0; font-size: 1.4rem; font-weight: 600; letter-spacing: .01em; }
+  .rigpick { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: .9rem; }
+  select, button {
+    font: inherit; font-size: .88rem; color: var(--text); background: var(--deck);
+    border: 1px solid var(--hairline); border-radius: 8px; padding: 6px 12px;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled), select:hover { border-color: var(--dim); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button:focus-visible, select:focus-visible, .stream:focus-visible { outline: 2px solid var(--gemini); outline-offset: 2px; }
+  .status { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: .85rem; color: var(--dim); }
+  .pill { padding: 2px 11px; border: 1px solid var(--off); border-radius: 999px; font-size: .8rem; color: var(--dim); white-space: nowrap; }
+  .pill.live { border-color: var(--pass); color: var(--pass); }
+  .pill.sim { border-color: var(--warn); color: var(--warn); }
+  .pill.off { border-color: var(--fail); color: var(--fail); }
+  .notice { margin: 0 0 12px; padding: 9px 14px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--deck); color: var(--dim); font-size: .9rem; }
+  .notice[hidden] { display: none; }
+  .notice code { font-family: var(--code); color: var(--text); }
+
+  /* the two decks */
+  .decks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .deck {
+    --accent: var(--claude);
+    --rule: var(--accent);
+    position: relative; display: flex; flex-direction: column; min-width: 0;
+    background: var(--deck); border: 1px solid var(--hairline); border-radius: 14px; overflow: hidden;
+  }
+  .deck::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--rule); }
+  .deck.gemini { --accent: var(--gemini); --rule: linear-gradient(90deg, var(--gemini), var(--gemini-2)); }
+  .deck-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 14px 8px; }
+  .badge { padding: 1px 11px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-size: .85rem; font-weight: 600; white-space: nowrap; }
+  .seat { font-size: 1.05rem; font-weight: 600; }
+  .seat-pick { max-width: 14rem; padding: 3px 8px; }
+  .session { font: .78rem/1.4 var(--code); color: var(--dim); overflow-wrap: anywhere; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); margin-left: auto; flex: none; }
+  .dot.running { background: var(--pass); box-shadow: 0 0 8px var(--pass); }
+  .dot.warn { background: var(--warn); }
+  .dot.fail { background: var(--fail); }
+  .stream {
+    margin: 0 14px; height: clamp(260px, calc(100vh - 500px), 640px); overflow: auto; padding: 10px 12px;
+    background: var(--well); border: 1px solid var(--hairline); border-radius: 8px;
+    font: .76rem/1.55 var(--code); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2;
+  }
+  .stream .empty { color: var(--dim); font-family: var(--ui); font-size: .9rem; white-space: normal; }
+  .stream code { font-family: var(--code); color: var(--text); }
+  .ln.cmd { color: var(--accent); }
+  .ln.pass { color: var(--pass); }
+  .ln.fail { color: var(--fail); }
+  .deck-foot { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 9px 14px 12px; font: .74rem/1.4 var(--code); color: var(--dim); overflow-wrap: anywhere; }
+
+  /* the strip at the bottom: the test gates and landing, as lamps */
+  .strip {
+    position: sticky; bottom: 0; z-index: 5;
+    background: linear-gradient(to bottom, rgba(7, 16, 34, .86), var(--ink) 28%);
+    border-top: 1px solid var(--hairline); backdrop-filter: blur(6px);
+  }
+  .strip-inner { max-width: 1480px; margin: 0 auto; padding: 12px 20px 14px; display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 14px; }
+  .cell { --lamp: var(--off); display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; align-items: start; min-width: 0; padding: 10px 14px; background: var(--deck); border: 1px solid var(--hairline); border-radius: 12px; }
+  .cell.pass { --lamp: var(--pass); }
+  .cell.fail { --lamp: var(--fail); }
+  .cell.warn { --lamp: var(--warn); }
+  .lamp { width: 14px; height: 14px; margin-top: 4px; border-radius: 50%; background: var(--lamp); box-shadow: 0 0 10px color-mix(in srgb, var(--lamp) 70%, transparent); }
+  .cell.off .lamp { box-shadow: none; }
+  .cell .what { font-size: .8rem; color: var(--dim); }
+  .cell .verdict { font-size: 1.05rem; font-weight: 600; color: var(--lamp); }
+  .cell.off .verdict { color: var(--dim); }
+  .cell .detail { font: .74rem/1.45 var(--code); color: var(--dim); overflow-wrap: anywhere; }
+  .cell > div { min-width: 0; }
+  .lanes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .lane { padding: 0 9px; border: 1px solid var(--off); border-radius: 999px; font-size: .78rem; color: var(--dim); }
+  .lane.pass { border-color: var(--pass); color: var(--pass); }
+  .lane.fail { border-color: var(--fail); color: var(--fail); }
+  .lane.warn { border-color: var(--warn); color: var(--warn); }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  .actions code { font: .76rem var(--code); color: var(--text); padding: 3px 9px; background: var(--well); border: 1px solid var(--hairline); border-radius: 6px; }
+  .actions .msg { flex-basis: 100%; font-size: .82rem; color: var(--dim); }
+
+  @media (max-width: 960px) {
+    .decks { grid-template-columns: 1fr; }
+    .stream { height: 38vh; min-height: 220px; }
+    .strip { position: static; }
+    .strip-inner { grid-template-columns: 1fr; gap: 8px; padding: 10px 14px 12px; }
+    .status { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .dot.running { animation: breathe 2.4s ease-in-out infinite; }
+    @keyframes breathe { 50% { box-shadow: 0 0 3px var(--pass); } }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+        <path d="M3 6 C12 6 13 15 21 15" stroke="#3dd9f5"/><path d="M3 15 H21" stroke="#f573d9"/><path d="M3 24 C12 24 13 15 21 15" stroke="#ffc45c"/><path d="M21 15 H28" stroke="#72f2a9"/>
+      </svg>
+      <h1>Squadron cockpit</h1>
+    </div>
+    <label class="rigpick">Rig <select id="rig" aria-label="Rig"></select></label>
+    <div class="status">
+      <span class="pill" id="mode">Connecting</span>
+      <span id="updated"></span>
+    </div>
+  </header>
+
+  <p class="notice" id="notice" hidden></p>
+
+  <main class="decks">
+    <section class="deck claude" id="deck-left" aria-label="Claude seat"></section>
+    <section class="deck gemini" id="deck-right" aria-label="Gemini seat"></section>
+  </main>
+</div>
+
+<footer class="strip" aria-label="Test gates and landing">
+  <div class="strip-inner">
+    <div class="cell off" id="gate-left"></div>
+    <div class="cell off" id="gate-right"></div>
+    <div class="cell off" id="land"></div>
+  </div>
+</footer>
+<noscript><p class="notice">The cockpit needs JavaScript.</p></noscript>
+
+<!-- Pure functions only: no page, no network. daemon/test/dual-cockpit-page.test.ts runs this block on its own. -->
+<script id="cockpit-logic">
+var CockpitLogic = (function () {
+  "use strict";
+
+  var ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]|\u001b\][^\u0007]*\u0007/g;
+  var RUNTIME_NAMES = { "claude-code": "Claude Code", codex: "Codex", gemini: "Gemini CLI", pi: "Pi", terminal: "Terminal" };
+  var LANE_WORDS = { merged: "merged", already_landed: "already landed", would_merge: "would merge", conflict: "conflict", not_ready: "not ready", not_attempted: "not merged" };
+  var LANE_TONES = { merged: "pass", already_landed: "pass", would_merge: "pass", conflict: "fail", not_ready: "warn", not_attempted: "off" };
+
+  function stripAnsi(text) { return String(text == null ? "" : text).replace(ANSI, ""); }
+
+  /** The last n lines of a screen capture, without escape codes and without the empty lines tmux pads it with. */
+  function tailLines(text, n) {
+    var lines = stripAnsi(text).replace(/\r/g, "").split("\n");
+    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+    return lines.slice(-n).join("\n");
+  }
+
+  function runtimeName(runtime) { return RUNTIME_NAMES[runtime] || runtime || "Unknown runtime"; }
+
+  /** How a line of a seat's screen is drawn. Only a shell prompt and Squadron's own gate words are singled out; the agent's output is left alone. */
+  function lineTone(line) {
+    if (/^\s*\$ /.test(line)) return "cmd";
+    if (/^Gate passed\b/.test(line)) return "pass";
+    if (/^Gate (failed|timed out|did not complete)\b/.test(line)) return "fail";
+    return "";
+  }
+
+  /** The seat to show for a runtime: the one asked for if it has that runtime, else the first that does. */
+  function pickSeat(seats, runtime, preferred) {
+    var ofRuntime = (seats || []).filter(function (seat) { return seat.runtime === runtime; });
+    return ofRuntime.filter(function (seat) { return seat.seat === preferred; })[0] || ofRuntime[0] || null;
+  }
+
+  function shortSha(sha) { return sha ? String(sha).slice(0, 7) : ""; }
+
+  function formatDuration(ms) {
+    if (ms == null) return "";
+    return ms < 1000 ? Math.round(ms) + "ms" : (ms / 1000).toFixed(1) + "s";
+  }
+
+  /** A command for display: parts with spaces are quoted so it reads back as typed. */
+  function commandLine(argv) {
+    return (argv || []).map(function (part) { return /\s/.test(part) ? JSON.stringify(part) : part; }).join(" ");
+  }
+
+  /** A seat's latest gate run as a lamp: its tone, a verdict, and the commit, time and command behind it. */
+  function gateView(gate) {
+    if (!gate) return { tone: "off", label: "No gate run yet", detail: "" };
+    var detail = [gate.commitSha ? "at " + shortSha(gate.commitSha) : "", formatDuration(gate.durationMs), commandLine(gate.argv)].filter(Boolean).join(", ");
+    if (gate.status === "passed") return { tone: "pass", label: "Passed", detail: detail };
+    if (gate.status === "failed") return { tone: "fail", label: gate.exitCode == null ? "Failed" : "Failed (exit code " + gate.exitCode + ")", detail: detail };
+    if (gate.status === "timed_out") return { tone: "fail", label: "Timed out", detail: detail };
+    return { tone: "warn", label: "Did not complete", detail: detail };
+  }
+
+  /** The dry run's answer as a lamp, one chip per lane, and whether landing for real is on offer. */
+  function landingView(landing) {
+    var none = { lanes: [], canLand: false, detail: "" };
+    if (!landing) return Object.assign({ tone: "off", label: "No landing information" }, none);
+    if (landing.error !== undefined) {
+      if (landing.code === "not_found") return Object.assign({ tone: "off", label: "No isolated seats to land" }, none, { detail: landing.error });
+      if (landing.code === "in_use") return Object.assign({ tone: "warn", label: "A land is running" }, none, { detail: landing.error });
+      return Object.assign({ tone: "fail", label: "Landing cannot be judged" }, none, { detail: landing.error });
+    }
+    var lanes = (landing.lanes || []).map(function (lane) {
+      return { seat: lane.seat, label: LANE_WORDS[lane.result] || lane.result, tone: LANE_TONES[lane.result] || "off", detail: lane.detail || "" };
+    });
+    if (landing.outcome === "ready") return { tone: "pass", label: "Ready to land", lanes: lanes, canLand: true, detail: "onto " + landing.branch };
+    if (landing.outcome === "not_ready") {
+      var waiting = lanes.filter(function (lane) { return lane.tone === "warn"; }).map(function (lane) { return lane.seat; });
+      return { tone: "warn", label: waiting.length > 0 ? "Not ready: " + waiting.join(", ") : "Not ready", lanes: lanes, canLand: false, detail: "" };
+    }
+    if (landing.outcome === "nothing_to_land") return { tone: "off", label: "Nothing new to land", lanes: lanes, canLand: false, detail: "" };
+    return { tone: "warn", label: String(landing.outcome).replace(/_/g, " "), lanes: lanes, canLand: false, detail: "" };
+  }
+
+  /** What to tell the person after they asked for a dry run or a land. */
+  function landResultText(result, dryRun) {
+    var lane = (result.lanes || []).filter(function (candidate) { return candidate.result === "conflict"; })[0];
+    switch (result.outcome) {
+      case "ready": {
+        var n = (result.lanes || []).filter(function (candidate) { return candidate.result === "would_merge"; }).length;
+        return "Dry run: " + n + (n === 1 ? " lane" : " lanes") + " would merge onto " + result.branch + ". Nothing was changed.";
+      }
+      case "landed": return "Landed on " + result.branch + ", checked out at " + result.worktreePath + ". Your own branches were not changed.";
+      case "nothing_to_land": return "Nothing new to land: every lane is already included.";
+      case "not_ready": return "Nothing was merged: some lanes are not ready, and " + result.branch + " is unchanged.";
+      case "conflict": return "Stopped at a conflict" + (lane ? " in " + lane.seat : "") + ". " + result.branch + " keeps the lanes merged before it and is otherwise unchanged.";
+      case "gate_failed": return "The integration branch failed its gate. It is kept at " + result.worktreePath + " so you can look.";
+      case "setup_failed": return "Setting up the integration worktree failed.";
+      default: return "Landing answered: " + result.outcome + ".";
+    }
+  }
+
+  function agoText(iso, nowMs) {
+    var then = Date.parse(iso);
+    if (!isFinite(then)) return "";
+    var seconds = Math.max(0, Math.round((nowMs - then) / 1000));
+    return seconds < 2 ? "just now" : seconds < 90 ? seconds + "s ago" : Math.round(seconds / 60) + "m ago";
+  }
+
+  return { stripAnsi: stripAnsi, tailLines: tailLines, runtimeName: runtimeName, lineTone: lineTone, pickSeat: pickSeat, shortSha: shortSha, formatDuration: formatDuration, commandLine: commandLine, gateView: gateView, landingView: landingView, landResultText: landResultText, agoText: agoText };
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+  var L = CockpitLogic;
+  var $ = function (id) { return document.getElementById(id); };
+  var params = new URLSearchParams(window.location.search);
+
+  function stored(key) { try { return window.localStorage.getItem(key); } catch (e) { return null; } }
+  function remember(key, value) { try { window.localStorage.setItem(key, value); } catch (e) { /* private window: fine */ } }
+
+  // Where the seat streams, gates and landing come from: this daemon, or a script (?demo=1, or a file opened without a daemon).
+  var token = window.__SQUADRON_TOKEN__ || stored("openrig.terminalBearerToken");
+  var demo = params.has("demo") || window.location.protocol === "file:";
+  var state = {
+    mode: demo ? "demo" : "live",
+    rig: params.get("rig") || stored("squadron.cockpit.rig"),
+    view: null,
+    streams: { left: { text: "" }, right: { text: "" } },
+    picks: { left: params.get("left"), right: params.get("right") },
+    stick: { left: true, right: true },
+    landMessage: "",
+    busy: false,
+    error: null,
+    updatedAt: null
+  };
+  var SIDES = [
+    { key: "left", runtime: "claude-code", deck: "deck-left", gate: "gate-left", name: "Claude Code" },
+    { key: "right", runtime: "gemini", deck: "deck-right", gate: "gate-right", name: "Gemini CLI" }
+  ];
+
+  // ---- small DOM helpers: everything from the daemon goes in as text, never as markup ----
+  function h(tag, attrs) {
+    var node = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (name) {
+      if (name === "text") node.textContent = attrs[name];
+      else if (name === "class") node.className = attrs[name];
+      else if (name.slice(0, 2) === "on") node.addEventListener(name.slice(2), attrs[name]);
+      else if (attrs[name] !== null && attrs[name] !== undefined) node.setAttribute(name, attrs[name]);
+    });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i]) node.appendChild(arguments[i]);
+    return node;
+  }
+  function fill(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+    for (var i = 1; i < arguments.length; i++) if (arguments[i]) node.appendChild(arguments[i]);
+  }
+
+  // ---- decks ----
+  var streamEls = {};
+  function renderDeck(side, seat) {
+    var deck = $(side.deck);
+    var head;
+    if (!seat) {
+      var hint = side.runtime === "gemini"
+        ? ['Start one with: ', 'squad swarm "…" --runtime frontend=gemini']
+        : ['Start one with: ', 'squad swarm "…" --runtime backend=claude-code'];
+      var waiting = state.view === null;
+      var empty = waiting
+        ? h("div", { class: "empty", text: state.error || "Connecting to the daemon…" })
+        : h("div", { class: "empty" }, document.createTextNode("No " + side.name + " seat in this rig. " + hint[0]), h("code", { text: hint[1] }));
+      streamEls[side.key] = h("pre", { class: "stream", tabindex: "0", role: "log", "aria-live": "off", "aria-label": side.name + " seat output" }, empty);
+      fill(deck, h("header", { class: "deck-head" }, h("span", { class: "badge", text: side.name }), h("span", { class: "session", text: "no seat" })), streamEls[side.key], h("footer", { class: "deck-foot" }));
+      return;
+    }
+    var seats = (state.view ? state.view.seats : []).filter(function (candidate) { return candidate.runtime === side.runtime; });
+    var picker = null;
+    if (seats.length > 1) {
+      picker = h("select", { class: "seat-pick", "aria-label": side.name + " seat" });
+      seats.forEach(function (candidate) {
+        var option = h("option", { value: candidate.seat, text: candidate.seat });
+        if (candidate.seat === seat.seat) option.selected = true;
+        picker.appendChild(option);
+      });
+      picker.addEventListener("change", function () { state.picks[side.key] = picker.value; state.streams[side.key] = { text: "" }; renderAll(); pollStreams(true); });
+    }
+    var dotTone = seat.sessionStatus === "running" ? "running" : seat.sessionStatus ? "warn" : "";
+    head = h("header", { class: "deck-head" },
+      h("span", { class: "badge", text: L.runtimeName(seat.runtime) }),
+      picker || h("b", { class: "seat", text: seat.seat }),
+      h("span", { class: "session", text: seat.session || "no session" }),
+      h("span", { class: "dot " + dotTone, title: seat.sessionStatus || "no session", role: "img", "aria-label": "session " + (seat.sessionStatus || "none") }));
+    streamEls[side.key] = h("pre", { class: "stream", tabindex: "0", role: "log", "aria-live": "off", "aria-label": side.name + " seat output" });
+    streamEls[side.key].addEventListener("scroll", function () {
+      var el = streamEls[side.key];
+      state.stick[side.key] = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    });
+    fill(deck, head, streamEls[side.key],
+      h("footer", { class: "deck-foot" }, h("span", { text: seat.branch || "not isolated" }), seat.worktreePath ? h("span", { text: seat.worktreePath }) : null));
+    renderStream(side);
+  }
+
+  function renderStream(side) {
+    var el = streamEls[side.key];
+    var stream = state.streams[side.key];
+    if (!el || el.firstChild && el.firstChild.className === "empty") return;
+    var text = stream.error ? "(" + stream.error + ")" : stream.text || "";
+    if (el.textContent !== text) {
+      var lines = text.split("\n");
+      el.textContent = "";
+      lines.forEach(function (line, i) {
+        var tone = stream.error ? "" : L.lineTone(line);
+        el.appendChild(tone ? h("span", { class: "ln " + tone, text: line }) : document.createTextNode(line));
+        if (i < lines.length - 1) el.appendChild(document.createTextNode("\n"));
+      });
+      if (state.stick[side.key]) el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  // ---- the strip ----
+  // A cell is rebuilt only when what it shows has changed, so a button keeps its focus between polls and frames.
+  function paint(cell, signature, build) {
+    if (cell.getAttribute("data-sig") === signature) return;
+    cell.setAttribute("data-sig", signature);
+    build();
+  }
+
+  function renderGate(side, seat) {
+    var cell = $(side.gate);
+    var view = L.gateView(seat ? seat.gate : null);
+    paint(cell, JSON.stringify([seat ? seat.seat : null, view]), function () {
+      cell.className = "cell " + (seat ? view.tone : "off");
+      fill(cell, h("span", { class: "lamp", "aria-hidden": "true" }),
+        h("div", {}, h("div", { class: "what", text: seat ? "Test gate, " + seat.seat : "Test gate, " + side.name }), h("div", { class: "verdict", text: seat ? view.label : "No seat" }), seat && view.detail ? h("div", { class: "detail", text: view.detail }) : null));
+    });
+  }
+
+  function renderLand() {
+    var cell = $("land");
+    var view = L.landingView(state.view ? state.view.landing : null);
+    var command = "squad land " + (state.view ? state.view.rig.name : state.rig || "<rig>");
+    paint(cell, JSON.stringify([view, command, state.landMessage, state.busy, state.mode, !!state.view]), function () { buildLand(cell, view, command); });
+  }
+
+  function buildLand(cell, view, command) {
+    var lanes = h("div", { class: "lanes" });
+    view.lanes.forEach(function (lane) { lanes.appendChild(h("span", { class: "lane " + lane.tone, title: lane.detail || lane.label, text: lane.seat + ": " + lane.label })); });
+    var isDemo = state.mode === "demo";
+    var dry = h("button", { type: "button", text: "Dry run", title: isDemo ? "Simulation" : "Judge the lanes; change nothing", onclick: function () { runLand(true); } });
+    var land = h("button", { type: "button", text: "Land", title: isDemo ? "Simulation" : "Merge the lanes that passed onto the integration branch", onclick: function () { runLand(false); } });
+    dry.disabled = isDemo || state.busy || !state.view;
+    land.disabled = isDemo || state.busy || !view.canLand;
+    var copy = h("button", { type: "button", text: "Copy", "aria-label": "Copy the land command", onclick: function () {
+      try { navigator.clipboard.writeText(command).then(function () { copy.textContent = "Copied"; setTimeout(function () { copy.textContent = "Copy"; }, 1400); }); } catch (e) { /* no clipboard: the command is on screen */ }
+    } });
+    cell.className = "cell " + view.tone;
+    fill(cell, h("span", { class: "lamp", "aria-hidden": "true" }),
+      h("div", {},
+        h("div", { class: "what", text: "Landing" }),
+        h("div", { class: "verdict", text: view.label }),
+        view.detail ? h("div", { class: "detail", text: view.detail }) : null,
+        view.lanes.length > 0 ? lanes : null,
+        h("div", { class: "actions" }, dry, land, h("code", { text: command }), copy, state.landMessage ? h("span", { class: "msg", text: state.landMessage }) : null)));
+  }
+
+  function runLand(dryRun) {
+    if (!state.view || state.busy) return;
+    var rig = state.view.rig.name;
+    if (!dryRun && !window.confirm("Land rig " + rig + "?\n\nThis merges the lanes that passed their gates onto squad/" + rig + "/integration and gates the result. Your own branches are not changed.")) return;
+    state.busy = true;
+    state.landMessage = dryRun ? "Judging the lanes…" : "Landing…";
+    renderAll();
+    api("/api/land", { method: "POST", body: JSON.stringify(dryRun ? { rig: rig, dryRun: true } : { rig: rig }) }).then(function (answer) {
+      state.landMessage = answer.status === 200 && answer.body && answer.body.result ? L.landResultText(answer.body.result, dryRun) : (answer.body && answer.body.error) || "The daemon answered HTTP " + answer.status + ".";
+    }, function () { state.landMessage = "Cannot reach the daemon."; }).then(function () { state.busy = false; return pollView(true); });
+  }
+
+  // ---- the page ----
+  function renderMode() {
+    var mode = $("mode");
+    var notice = $("notice");
+    if (state.mode === "demo") {
+      mode.className = "pill sim"; mode.textContent = "Simulation"; mode.title = "Scripted playback. The seats, output and results shown here are not live.";
+      var onFile = window.location.protocol === "file:";
+      notice.hidden = !onFile;
+      if (onFile) fill(notice, document.createTextNode("This file is open without a daemon, so it plays a scripted simulation. For live seats run "), h("code", { text: "squad start" }), document.createTextNode(" and open the daemon's /cockpit page."));
+    } else if (state.error) {
+      mode.className = "pill off"; mode.textContent = "Offline"; mode.title = state.error;
+      notice.hidden = false; notice.textContent = state.error;
+    } else {
+      mode.className = "pill live"; mode.textContent = "Live"; mode.title = "Reading this daemon";
+      notice.hidden = true;
+    }
+    $("updated").textContent = state.updatedAt ? "Updated " + L.agoText(state.updatedAt, Date.now()) : "";
+  }
+
+  function renderAll() {
+    var seats = state.view ? state.view.seats : [];
+    SIDES.forEach(function (side) {
+      var seat = L.pickSeat(seats, side.runtime, state.picks[side.key]);
+      side.seat = seat;
+      var current = $(side.deck).getAttribute("data-seat");
+      var wanted = seat ? seat.seat + "|" + seats.filter(function (c) { return c.runtime === side.runtime; }).length : state.view === null ? "waiting|" + (state.error || "") : "none";
+      if (current !== wanted) { renderDeck(side, seat); $(side.deck).setAttribute("data-seat", wanted); } else if (seat) { updateDeckHead(side, seat); }
+      renderStream(side);
+      renderGate(side, seat);
+    });
+    renderLand();
+    renderMode();
+  }
+
+  // The head keeps its seat picker (and its focus) between polls; only the session lamp and the footer can change.
+  function updateDeckHead(side, seat) {
+    var deck = $(side.deck);
+    var dot = deck.querySelector(".dot");
+    if (dot) { dot.className = "dot " + (seat.sessionStatus === "running" ? "running" : seat.sessionStatus ? "warn" : ""); dot.title = seat.sessionStatus || "no session"; }
+    var session = deck.querySelector(".session");
+    if (session) session.textContent = seat.session || "no session";
+  }
+
+  // ---- live: this daemon ----
+  function api(path, init) {
+    init = init || {};
+    var headers = { Accept: "application/json" };
+    if (init.body) headers["Content-Type"] = "application/json";
+    if (token) headers.Authorization = "Bearer " + token;
+    return fetch(path, { method: init.method || "GET", headers: headers, body: init.body }).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (body) { return { status: res.status, body: body }; });
+    });
+  }
+
+  var timers = {};
+  function later(name, fn, ms) { clearTimeout(timers[name]); timers[name] = setTimeout(fn, ms); }
+
+  function pollView(once) {
+    if (!state.rig) return Promise.resolve();
+    return api("/api/cockpit/" + encodeURIComponent(state.rig)).then(function (answer) {
+      if (answer.status === 200 && answer.body && answer.body.ok) { state.view = answer.body.cockpit; state.error = null; state.updatedAt = new Date().toISOString(); }
+      else state.error = (answer.body && answer.body.error) || "The daemon answered HTTP " + answer.status + ".";
+    }, function () { state.error = "Cannot reach the daemon. Is it running? Start it with: squad start"; })
+      .then(function () { renderAll(); if (!once) later("view", pollView, 4000); });
+  }
+
+  function pollStreams(once) {
+    var jobs = SIDES.map(function (side) {
+      var seat = side.seat;
+      if (!seat || !seat.session) return Promise.resolve();
+      return api("/api/sessions/" + encodeURIComponent(seat.session) + "/preview?lines=120").then(function (answer) {
+        state.streams[side.key] = answer.status === 200 && answer.body ? { text: L.tailLines(answer.body.content, 120) } : { error: (answer.body && (answer.body.hint || answer.body.error)) || "no screen yet (HTTP " + answer.status + ")" };
+      }, function () { state.streams[side.key] = { error: "cannot reach the daemon" }; }).then(function () { renderStream(side); });
+    });
+    return Promise.all(jobs).then(function () { if (!once) later("streams", pollStreams, 1500); });
+  }
+
+  function startLive() {
+    state.mode = "live";
+    var pick = $("rig");
+    api("/api/rigs/summary").then(function (answer) {
+      var rigs = Array.isArray(answer.body) ? answer.body : [];
+      rigs.forEach(function (rig) { pick.appendChild(h("option", { value: rig.name, text: rig.name })); });
+      if (!state.rig && rigs.length > 0) state.rig = rigs[0].name;
+      if (state.rig && !rigs.some(function (rig) { return rig.name === state.rig; })) pick.insertBefore(h("option", { value: state.rig, text: state.rig }), pick.firstChild);
+      if (state.rig) pick.value = state.rig;
+      if (!state.rig) { state.error = "No rig is running. Start a squad with: squad swarm \"…\" --launch"; renderAll(); }
+    }, function () { state.error = "Cannot reach the daemon. Is it running? Start it with: squad start"; renderAll(); }).then(function () {
+      pick.addEventListener("change", function () { state.rig = pick.value; remember("squadron.cockpit.rig", state.rig); state.view = null; state.streams = { left: { text: "" }, right: { text: "" } }; state.landMessage = ""; renderAll(); pollView(); });
+      pollView().then(function () { pollStreams(); });
+      setInterval(renderMode, 5000);
+    });
+  }
+
+  // ---- demo: a scripted squad, drawn by the same code ----
+  var DEMO = (function () {
+    var rig = "build-auth-api";
+    var left = { nodeId: "01DEMOL", seat: "swarm.backend", runtime: "claude-code", session: "swarm-backend@" + rig, sessionStatus: "running", branch: "squad/" + rig + "/swarm.backend", worktreePath: "../squad-worktrees/" + rig + "/swarm.backend", setupState: "passed", gate: null };
+    var right = { nodeId: "01DEMOR", seat: "swarm.frontend", runtime: "gemini", session: "swarm-frontend@" + rig, sessionStatus: "running", branch: "squad/" + rig + "/swarm.frontend", worktreePath: "../squad-worktrees/" + rig + "/swarm.frontend", setupState: "passed", gate: null };
+    var gate = function (status, exitCode, sha, ms) { return { status: status, exitCode: exitCode, commitSha: sha, argv: ["npm", "test"], durationMs: ms, startedAt: "" }; };
+    return {
+      rig: rig, left: left, right: right, end: 27, loopAt: 31,
+      leftLines: [
+        [0.6, "> Add POST /auth/login and the token service"],
+        [2.2, "  edit  src/auth/auth.service.ts"],
+        [3.4, "  edit  src/auth/routes.ts"],
+        [5.2, "$ git add src/auth/auth.service.ts src/auth/routes.ts"],
+        [5.8, "$ git commit -m \"add login service and route\""],
+        [6.4, "[squad/" + rig + "/swarm.backend 3f9c1ab] add login service and route"],
+        [8.0, "I'm done with the server side. Running my gate."],
+        [8.8, "$ squad gate run"],
+        [11.0, "Gate passed for swarm.backend at 3f9c1ab (2.4s): npm test"],
+        [12.0, "Waiting for the frontend seat before anyone lands."]
+      ],
+      rightLines: [
+        [1.0, "> Build the login form and call POST /auth/login"],
+        [2.8, "  edit  src/components/LoginForm.tsx"],
+        [4.6, "  edit  src/lib/api.ts"],
+        [6.8, "$ git add src/components/LoginForm.tsx src/lib/api.ts"],
+        [7.4, "$ git commit -m \"login form calls the login route\""],
+        [8.0, "[squad/" + rig + "/swarm.frontend b21d7e0] login form calls the login route"],
+        [9.6, "$ squad gate run"],
+        [12.4, "Gate failed (exit code 1) for swarm.frontend at b21d7e0 (2.8s): npm test"],
+        [12.8, "  1 failing: submits email and password to /auth/login"],
+        [14.6, "  edit  src/lib/api.ts   (send the body as JSON)"],
+        [16.0, "$ git add src/lib/api.ts && git commit -m \"send the login body as JSON\""],
+        [16.8, "[squad/" + rig + "/swarm.frontend 5d0a8c4] send the login body as JSON"],
+        [17.6, "$ squad gate run"],
+        [20.2, "Gate passed for swarm.frontend at 5d0a8c4 (2.6s): npm test"]
+      ],
+      leftGate: function (t) { return t >= 11.0 ? gate("passed", 0, "3f9c1ab", 2400) : null; },
+      rightGate: function (t) { return t >= 20.2 ? gate("passed", 0, "5d0a8c4", 2600) : t >= 12.4 ? gate("failed", 1, "b21d7e0", 2800) : null; },
+      landing: function (t) {
+        if (t >= 24.6) return { outcome: "nothing_to_land", branch: "squad/" + rig + "/integration", lanes: [{ seat: left.seat, result: "already_landed", tipSha: "3f9c1ab" }, { seat: right.seat, result: "already_landed", tipSha: "5d0a8c4" }] };
+        var bothPassed = t >= 20.2;
+        return { outcome: bothPassed ? "ready" : "not_ready", branch: "squad/" + rig + "/integration", lanes: [
+          { seat: left.seat, result: t >= 11.0 ? (bothPassed ? "would_merge" : "not_attempted") : "not_ready", tipSha: "3f9c1ab", detail: t >= 11.0 ? "" : "no gate result yet" },
+          { seat: right.seat, result: bothPassed ? "would_merge" : "not_ready", tipSha: bothPassed ? "5d0a8c4" : "b21d7e0", detail: bothPassed ? "" : t >= 12.4 ? "the gate failed at b21d7e0" : "no gate result yet" }
+        ] };
+      }
+    };
+  })();
+
+  function demoFrame(t) {
+    var lines = function (script) { return script.filter(function (entry) { return t >= entry[0]; }).map(function (entry) { return entry[1]; }).join("\n"); };
+    state.view = {
+      rig: { id: "demo", name: DEMO.rig },
+      seats: [Object.assign({}, DEMO.left, { gate: DEMO.leftGate(t) }), Object.assign({}, DEMO.right, { gate: DEMO.rightGate(t) })],
+      landing: DEMO.landing(t), generatedAt: ""
+    };
+    state.streams = { left: { text: lines(DEMO.leftLines) }, right: { text: lines(DEMO.rightLines) } };
+    state.landMessage = t >= 22.4 && t < 24.6 ? "Landing…" : t >= 24.6 ? "Landed on squad/" + DEMO.rig + "/integration. Your own branches were not changed. (Simulated.)" : "";
+    renderAll();
+  }
+
+  function startDemo() {
+    state.mode = "demo";
+    state.rig = DEMO.rig;
+    var pick = $("rig");
+    pick.appendChild(h("option", { value: DEMO.rig, text: DEMO.rig }));
+    pick.disabled = true;
+    var t = params.has("t") ? Math.min(Math.max(parseFloat(params.get("t")) || 0, 0), DEMO.loopAt) : 0;
+    var playing = params.get("paused") !== "1";
+    var last = 0;
+    demoFrame(t);
+    if (!playing) return;
+    function frame(now) {
+      var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
+      last = now;
+      t += dt;
+      if (t >= DEMO.loopAt) t = 0;
+      demoFrame(t);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  renderAll();
+  if (demo) startDemo(); else startLive();
+})();
+</script>
+</body>
+</html>
